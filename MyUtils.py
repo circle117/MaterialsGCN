@@ -17,7 +17,7 @@ def load_data(dataset, feature_map, val_ratio):
              y ndarry (None, 1)
     """
     df = pd.read_csv(dataset)
-    df = df.sample(frac=1).reset_index(drop=True)           # shuffle
+    # df = df.sample(frac=1).reset_index(drop=True)           # shuffle
 
     # y
     y = np.array(df['Tg']).reshape(-1, 1)

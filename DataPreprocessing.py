@@ -6,7 +6,7 @@ DATASET_PATH = './Dataset_test'
 EXCEL_NAME = 'data.xlsx'
 TG_METHOD = 'ALL'               # ALL or method's name
 IF_TYPE = False                  # use TYPE as feature or not
-METHOD = 2                      # 1 for one-step, 2 for two-step
+METHOD = 0                      # 0 for all, 1 for one-step, 2 for two-step
 TIME1_CON = True                # True for continuous, Flase for disperse
 OVERNIGHT = 20
 SEVERAL = 6
@@ -86,7 +86,15 @@ else:
     df = df[(df['Type'] == 'Polyaddition') | (df['Type'] == 'Polycondensation')]
 
 # 聚酰亚胺生成方法
-df = df[df['Method'] == METHOD]
+if METHOD == 0:
+    df = df.sample(frac=1).reset_index(drop=True)               # shuffle
+    order = ['SMILES', 'Tg']
+    df = df[order]
+    df.to_csv(os.path.join(DATASET_PATH, CSV_NAME), encoding='utf8', index=False)
+    exit()
+else:
+    df = df[df['Method'] == METHOD]
+
 
 # 反应温度
 df['Temperature1'] = df['Temperature1'].apply(TEMPERATURE_DIC.get)
@@ -110,4 +118,5 @@ elif METHOD == 2:
              'Method2', 'min_temp', 'max_temp', 'Time2', 'Tg']
     df = df[order]
 
+df = df.sample(frac=1).reset_index(drop=True)
 df.to_csv(os.path.join(DATASET_PATH, CSV_NAME), encoding='utf8', index=False)

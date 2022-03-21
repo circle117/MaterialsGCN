@@ -110,7 +110,7 @@ class MLP(Model):
                                         self.placeholders['labels_mask'])
 
     def _build(self):
-        self.layers.append(Dense(input_dim=self.input_dim,
+        self.layers.append(Dense1(input_dim=self.input_dim,
                                  output_dim=FLAGS.hidden1,
                                  placeholders=self.placeholders,
                                  act=tf.nn.relu,
@@ -118,7 +118,7 @@ class MLP(Model):
                                  sparse_inputs=True,
                                  logging=self.logging))
 
-        self.layers.append(Dense(input_dim=FLAGS.hidden1,
+        self.layers.append(Dense1(input_dim=FLAGS.hidden1,
                                  output_dim=self.output_dim,
                                  placeholders=self.placeholders,
                                  act=lambda x: x,
@@ -130,11 +130,12 @@ class MLP(Model):
 
 
 class GCN(Model):
-    def __init__(self, placeholders, input_dim, **kwargs):
+    def __init__(self, placeholders, input_dim, num_nodes, **kwargs):
         super(GCN, self).__init__(**kwargs)
 
         self.inputs = placeholders['features']
         self.input_dim = input_dim                                              # 特征数
+        self.num_nodes = num_nodes
         # self.input_dim = self.inputs.get_shape().as_list()[1]  # To be supported in future Tensorflow versions
         self.output_dim = placeholders['labels'].get_shape().as_list()[1]       # 分类数
         self.placeholders = placeholders
@@ -181,11 +182,24 @@ class GCN(Model):
                                             dropout=False,
                                             logging=self.logging))
 
-        self.layers.append(MaxPooling(input_dim=FLAGS.hidden2,
-                                      output_dim=self.placeholders['labels'],
-                                      placeholders=self.placeholders,
-                                      act=lambda x: x,
-                                      logging=self.logging))
+        self.layers.append(Dense1(input_dim=FLAGS.hidden3,
+                                  output_dim=self.output_dim,
+                                  placeholders=self.placeholders,
+                                  act=tf.nn.relu,
+                                  dropout=True,
+                                  bias=True))
+
+        self.layers.append(Dense2(input_dim=self.output_dim,
+                                  output_dim=self.num_nodes,
+                                  placeholders=self.placeholders,
+                                  act=lambda x: x,
+                                  bias=True))
+
+        # self.layers.append(MaxPooling(input_dim=FLAGS.hidden2,
+        #                               output_dim=self.placeholders['labels'],
+        #                               placeholders=self.placeholders,
+        #                               act=lambda x: x,
+        #                               logging=self.logging))
 
     def predict(self):
         return tf.nn.softplus(self.outputs)
