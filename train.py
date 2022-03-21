@@ -4,6 +4,7 @@ from MyUtils import *
 from utils import *
 from model import GCN, MLP
 import time
+import random
 
 tf.disable_v2_behavior()
 
@@ -14,7 +15,7 @@ FEATURE_LIST = ['*', 'C', 'N', 'O', 'F', 'S',               # 原子类别
                 'R0', 'R1']                                 # 是否在环上
 
 # Set random seed
-seed = 123
+seed = 117
 np.random.seed(seed)
 tf.set_random_seed(seed)
 
@@ -23,10 +24,10 @@ tf.set_random_seed(seed)
 flags = tf.app.flags
 FLAGS = flags.FLAGS
 flags.DEFINE_string('dataset', './Dataset_test/data_Method0.csv', 'Dataset string.')       # 'cora', 'citeseer', 'pubmed'
-flags.DEFINE_float('val_ratio', 0.1, 'Ratio of validation dataset')
+flags.DEFINE_float('val_ratio', 0.2, 'Ratio of validation dataset')
 flags.DEFINE_string('model', 'gcn_cheby', 'Model string.')      # 'gcn', 'gcn_cheby', 'dense'
 flags.DEFINE_float('learning_rate', 0.1, 'Initial learning rate.')
-flags.DEFINE_integer('epochs', 200, 'Number of epochs to train.')
+flags.DEFINE_integer('epochs', 500, 'Number of epochs to train.')
 flags.DEFINE_integer('hidden1', 64, 'Number of units in hidden layer 1.')
 flags.DEFINE_integer('hidden2', 128, 'Number of units in hidden layer 2.')
 flags.DEFINE_integer('hidden3', 64, 'Number of units in hidden layer 3.')
@@ -71,7 +72,7 @@ else:
 
 # train val split
 supports_train, features_train, y_train, supports_val, features_val, y_val = train_test_split(supports, features, y, FLAGS.val_ratio)
-
+list_for_shuffle = list(range(len(supports_train)))
 
 # Define placeholders
 placeholders = {
@@ -112,7 +113,7 @@ for epoch in range(FLAGS.epochs):
     loss = []
     accu = []
     val_record = []
-    for i in range(len(features)):
+    for i in list_for_shuffle:
         feed_dict = construct_feed_dict(features[i], supports[i], y[i, :].reshape((-1, 1)), placeholders)
         feed_dict.update({placeholders['dropout']: FLAGS.dropout})
 
@@ -129,6 +130,8 @@ for epoch in range(FLAGS.epochs):
     print("Epoch:", '%04d' % (epoch + 1), "train_loss=", "{:.5f}".format(loss_train),
           "train_acc=", "{:.5f}".format(accu_train), "val_loss=", "{:.5f}".format(loss_val),
           "val_acc=", "{:.5f}".format(accu_val), "time=", "{:.5f}".format(time.time() - t))
+
+    random.shuffle(list_for_shuffle)                        # 每个epoch结束后，shuffle
 
     if epoch>FLAGS.early_stopping and val_record[-1]>np.mean(val_record[-(FLAGS.early_stopping+1):-1]):
         print('Early stopping...')

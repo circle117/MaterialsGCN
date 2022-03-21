@@ -5,6 +5,11 @@ def mean_square_error(preds, labels):
     return tf.reduce_mean(tf.square(preds-labels))
 
 
+def root_mean_square_error(preds, labels):
+    res = tf.reduce_mean(tf.square(preds-labels))
+    return tf.pow(res,0.5)
+
+
 def masked_softmax_cross_entropy(preds, labels, mask):
     """Softmax cross-entropy loss with masking."""
     loss = tf.nn.softmax_cross_entropy_with_logits(logits=preds, labels=labels)

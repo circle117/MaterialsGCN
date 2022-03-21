@@ -150,13 +150,13 @@ class GCN(Model):
             self.loss += FLAGS.weight_decay * tf.nn.l2_loss(var)
 
         # Mean square error
-        self.loss += mean_square_error(self.outputs, self.placeholders['labels'])
+        self.loss += root_mean_square_error(self.outputs, self.placeholders['labels'])
             # tf.losses.mean_squared_error(self.outputs, self.placeholders['labels'])
         # self.loss += masked_softmax_cross_entropy(self.outputs, self.placeholders['labels'],
         #                                           self.placeholders['labels_mask'])
 
     def _accuracy(self):
-        self.accuracy = mean_square_error(self.outputs, self.placeholders['labels'])
+        self.accuracy = root_mean_square_error(self.outputs, self.placeholders['labels'])
 
     def _build(self):
 
