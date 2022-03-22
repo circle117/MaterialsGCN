@@ -186,27 +186,6 @@ class GCN(Model):
                                             dropout=False,
                                             logging=self.logging))
 
-        self.layers.append(GraphConvolution(input_dim=FLAGS.hidden3,
-                                            output_dim=FLAGS.hidden4,
-                                            placeholders=self.placeholders,
-                                            act=tf.nn.relu,
-                                            dropout=False,
-                                            logging=self.logging))
-
-        self.layers.append(GraphConvolution(input_dim=FLAGS.hidden4,
-                                            output_dim=FLAGS.hidden5,
-                                            placeholders=self.placeholders,
-                                            act=tf.nn.relu,
-                                            dropout=False,
-                                            logging=self.logging))
-
-        self.layers.append(GraphConvolution(input_dim=FLAGS.hidden5,
-                                            output_dim=FLAGS.hidden6,
-                                            placeholders=self.placeholders,
-                                            act=tf.nn.relu,
-                                            dropout=False,
-                                            logging=self.logging))
-
         if FLAGS.dense:
             self.layers.append(Dense1(input_dim=FLAGS.hidden3,
                                       output_dim=self.output_dim,
@@ -242,15 +221,15 @@ class GCN(Model):
             #                           dropout=False,
             #                           bias=True))
             #
-            self.layers.append(Dense1(input_dim=self.num_nodes*FLAGS.hidden6,
-                                      output_dim=FLAGS.hidden5,
+            self.layers.append(Dense1(input_dim=FLAGS.hidden3,
+                                      output_dim=self.output_dim,
                                       placeholders=self.placeholders,
                                       act=tf.nn.relu,
                                       dropout=True,
                                       bias=True))
 
-            self.layers.append(Dense1(input_dim=FLAGS.hidden5,
-                                      output_dim=self.output_dim,
+            self.layers.append(Dense2(input_dim=self.output_dim,
+                                      output_dim=self.num_nodes,
                                       placeholders=self.placeholders,
                                       act=lambda x: x,
                                       dropout=False,
@@ -271,16 +250,16 @@ class GCN(Model):
         for layer in self.layers:
             hidden = layer(self.activations[-1])
             self.activations.append(hidden)
-            if len(self.GCN_outputs) < self.num_graphs:
+            if (not FLAGS.dense) and len(self.GCN_outputs) < self.num_graphs:
                 self.GCN_outputs.append(hidden)
-            if len(self.activations)-1 == self.num_graphs:
+            if (not FLAGS.dense) and len(self.activations)-1 == self.num_graphs:
                 GCN_outputs = tf.stack(self.GCN_outputs, axis=1)
                 GCN_outputs = tf.reshape(GCN_outputs, [1, self.num_graphs, self.num_nodes, FLAGS.hidden1])
                 hidden = tf.nn.max_pool(GCN_outputs,
                                         ksize=[1, self.num_graphs, 1, 1],
                                         strides=[1, 1, 1, 1],
                                         padding='VALID')
-                hidden = tf.reshape(hidden, [1, self.num_nodes*FLAGS.hidden1])
+                hidden = tf.reshape(hidden, [self.num_nodes, FLAGS.hidden3])
                 self.activations.append(hidden)
         self.outputs = self.activations[-1]
 
