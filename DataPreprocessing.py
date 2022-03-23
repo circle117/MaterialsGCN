@@ -6,10 +6,12 @@ DATASET_PATH = './Dataset_test'
 EXCEL_NAME = 'data.xlsx'
 TG_METHOD = 'ALL'               # ALL or method's name
 IF_TYPE = False                  # use TYPE as feature or not
-METHOD = 0                      # 0 for all, 1 for one-step, 2 for two-step
+METHOD = 2                      # 0 for all, 1 for one-step, 2 for two-step
+SOLVENT = ['DMAc', 'NMP']
 TIME1_CON = True                # True for continuous, Flase for disperse
 OVERNIGHT = 20
 SEVERAL = 6
+RT = 20
 TEMPERATURE_DIC = {
     0: '0-14',
     5: '0-14',
@@ -68,6 +70,13 @@ def get_time_2(time):
     else:
         return round(time)
 
+
+def get_temperature(temp):
+    if temp=='RT':
+        return RT
+    else:
+        return temp
+
 df = pd.read_excel(os.path.join(DATASET_PATH, EXCEL_NAME))
 
 # mol文件转SMILES
@@ -86,7 +95,7 @@ else:
     df = df[(df['Type'] == 'Polyaddition') | (df['Type'] == 'Polycondensation')]
 
 # 聚酰亚胺生成方法
-if METHOD == 0:
+if METHOD == 0:                     # 所有生成方法，用于训练GCN
     df = df.sample(frac=1).reset_index(drop=True)               # shuffle
     order = ['SMILES', 'Tg']
     df = df[order]
@@ -95,6 +104,8 @@ if METHOD == 0:
 else:
     df = df[df['Method'] == METHOD]
 
+# 反应溶剂
+df = df[(df['Solvent'] == SOLVENT[0]) | (df['Solvent'] == SOLVENT[1])]
 
 # 反应温度
 df['Temperature1'] = df['Temperature1'].apply(TEMPERATURE_DIC.get)
@@ -107,7 +118,12 @@ else:
 
 # 处理第二步
 if METHOD == 2:
+    # 反应时间
     df['Time2'] = df.apply(lambda x:get_time_2(x['Time2']), axis=1)
+
+    # 反应温度
+    df['min_temp'] = df.apply(lambda x:get_temperature(x['min_temp']), axis=1)
+    df['max_temp'] = df.apply(lambda x:get_temperature(x['max_temp']), axis=1)
 
 # 保存
 if METHOD == 1:
