@@ -27,16 +27,25 @@ flags = tf.app.flags
 FLAGS = flags.FLAGS
 flags.DEFINE_string('dataset', './Dataset_test/data_Method2.csv', 'Dataset string.')       # 'cora', 'citeseer', 'pubmed'
 flags.DEFINE_float('val_ratio', 0.2, 'Ratio of validation dataset')
-# GCN
+# Model
 flags.DEFINE_string('model', 'mmgcn', 'Model string.')      # 'gcn', 'gcn_cheby', 'dense'
 flags.DEFINE_float('learning_rate', 0.01, 'Initial learning rate.')
 flags.DEFINE_integer('epochs', 500, 'Number of epochs to train.')
-flags.DEFINE_integer('gcn_hidden', 128, 'Number of units in GCN hidden layer .')
-flags.DEFINE_integer('num_graphs', 3, 'Number of units in hidden layer 3.')
 flags.DEFINE_float('dropout', 0.3, 'Dropout rate (1 - keep probability).')
 flags.DEFINE_float('weight_decay', 5e-2, 'Weight for L2 loss on embedding matrix.')
 flags.DEFINE_integer('early_stopping', 20, 'Tolerance for early stopping (# of epochs).')
+# GCN
+flags.DEFINE_integer('gcn_hidden', 128, 'Number of units in GCN hidden layer .')
+flags.DEFINE_integer('num_graphs', 3, 'Number of units in hidden layer 3.')
 flags.DEFINE_integer('max_degree', 2, 'Maximum Chebyshev polynomial degree.')
+# Embedding
+flags.DEFINE_integer('embed_output1', 1, 'Number of units in Embedding1 layer')         # Solvent
+flags.DEFINE_integer('embed_output2', 3, 'Number of units in Embedding2 layer')         # Temperature1
+flags.DEFINE_integer('embed_output3', 2, 'Number of units in Embedding3 layer')         # Method2
+# MLP
+flags.DEFINE_integer('mlp_hidden1', 16, 'Number of units in MLP hidden layer1')
+flags.DEFINE_integer('mlp_hidden2', 32, 'Number of units in MLP hidden layer2')
+flags.DEFINE_integer('mlp_hidden3', 16, 'Number of units in MLP hidden layer3')
 
 
 # load_data
@@ -110,9 +119,13 @@ for key, value in discrete_features.items():
     placeholders[key] = tf.placeholder(tf.float32, shape=(None, value.shape[1]))
 
 
+d_feature_dim = []
+for name in FEATURE_NAME[0]:
+    d_feature_dim.append((name, discrete_features_train[name].shape[1]))
+
 # Create model: input_dim = features size
 model = model_func(placeholders, input_dim=gcn_features[0][2][1], num_nodes=gcn_features[0][2][0],
-                   num_graphs=FLAGS.num_graphs, d_feature_name=FEATURE_NAME[0], logging=True)
+                   num_graphs=FLAGS.num_graphs, d_feature_dim=d_feature_dim, logging=True)
 
 # sess = tf.Session()
 #
