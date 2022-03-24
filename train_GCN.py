@@ -33,7 +33,7 @@ flags.DEFINE_integer('hidden2', 128, 'Number of units in hidden layer 2.')
 flags.DEFINE_integer('hidden3', 128, 'Number of units in hidden layer 3.')
 flags.DEFINE_integer('num_graphs', 3, 'Number of units in hidden layer 3.')
 # flags.DEFINE_integer('hidden7', 300, 'Number of units in hidden layer 3.')
-flags.DEFINE_float('dropout', 0.25, 'Dropout rate (1 - keep probability).')
+flags.DEFINE_float('dropout', 0.5, 'Dropout rate (1 - keep probability).')
 flags.DEFINE_float('weight_decay', 5e-2, 'Weight for L2 loss on embedding matrix.')
 flags.DEFINE_integer('early_stopping', 20, 'Tolerance for early stopping (# of epochs).')
 flags.DEFINE_integer('max_degree', 2, 'Maximum Chebyshev polynomial degree.')
@@ -73,7 +73,7 @@ else:
 
 
 # train val split
-supports_train, features_train, y_train, supports_val, features_val, y_val = train_test_split(supports, features, y, FLAGS.val_ratio)
+supports_train, features_train, y_train, supports_val, features_val, y_val = train_test_split_gcn(supports, features, y, FLAGS.val_ratio)
 list_for_shuffle = list(range(len(supports_train)))
 
 # Define placeholders
@@ -101,7 +101,7 @@ def evaluate(features, supports, y, placeholders):
     loss = []
     accu = []
     for i in range(len(features)):
-        feed_dict_val = construct_feed_dict(features[i], supports[i], y[i].reshape((-1, 1)), placeholders)
+        feed_dict_val = construct_feed_dict(features[i], supports[i], y[i].reshape(-1, 1), placeholders)
         outs = sess.run([model.loss, model.accuracy], feed_dict=feed_dict_val)
         loss.append(outs[0])
         accu.append(outs[1])
@@ -121,7 +121,7 @@ for epoch in range(FLAGS.epochs):
     loss = []
     accu = []
     for i in list_for_shuffle:
-        feed_dict = construct_feed_dict(features_train[i], supports_train[i], y_train[i, :].reshape((-1, 1)), placeholders)
+        feed_dict = construct_feed_dict(features_train[i], supports_train[i], y_train[i, :].reshape(-1, 1), placeholders)
         feed_dict.update({placeholders['dropout']: FLAGS.dropout})
 
         outs = sess.run([model.opt_op, model.loss, model.accuracy], feed_dict=feed_dict)

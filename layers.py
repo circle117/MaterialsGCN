@@ -152,7 +152,7 @@ class Dense2(Layer):
             self.vars['weights'] = glorot([input_dim, output_dim],
                                           name='weights')
             if self.bias:
-                self.vars['bias'] = zeros([output_dim], name='bias')
+                self.vars['bias'] = zeros([input_dim], name='bias')
 
         if self.logging:
             self._log_vars()
