@@ -8,7 +8,7 @@ import scipy.sparse as sp
 from scipy.sparse.linalg import eigsh
 
 
-def load_data(dataset, feature_map, val_ratio):
+def load_data_gcn(dataset, feature_map):
     """
     :param dataset: 数据集路径
     :param feature_map: one-hot特征映射
@@ -17,7 +17,6 @@ def load_data(dataset, feature_map, val_ratio):
              y ndarry (None, 1)
     """
     df = pd.read_csv(dataset)
-    # df = df.sample(frac=1).reset_index(drop=True)           # shuffle
 
     # y
     y = np.array(df['Tg']).reshape(-1, 1)
@@ -48,7 +47,7 @@ def load_data(dataset, feature_map, val_ratio):
             width = int(width/2)
             adjs[i] = sp.csr_matrix(np.pad(adjs[i].todense(), ((width, width+1), (width, width+1)), 'constant'))
     """
-    batch-wise
+    batch-wise没做
     """
 
     # features
@@ -76,7 +75,52 @@ def load_data(dataset, feature_map, val_ratio):
     return adjs, features, y
 
 
-def train_test_split(supports, features, y, val_ratio):
+def encode_one_hot(df, feature):
+    feature_list = list(set(df[feature].values))
+
+    arr = np.eye(len(feature_list))
+    feature_index = {}
+    for i, elem in enumerate(feature_list):
+        feature_index[elem] = i
+
+    feature_ont_hot = []
+    for i in range(df.shape[0]):
+        feature_ont_hot.append(arr[feature_index[df.loc[i, feature]]])
+
+    return np.array(feature_ont_hot)
+
+
+def load_data(dataset, feature_map, feature_name):
+    adjs, features, y = load_data_gcn(dataset, feature_map)
+
+    df = pd.read_csv(dataset)
+
+    # list of dicts
+    discrete_features = {}
+    continuous_features = []
+
+    for name in feature_name[0]:
+        discrete_features[name] = encode_one_hot(df, name)
+    for name in feature_name[1]:
+        continuous_features.append(np.array(list(df[name].values)))
+    continuous_features = np.stack(continuous_features, axis=1)
+
+    return adjs, features, y, discrete_features, continuous_features
+
+
+
+def train_test_split_gcn(supports, features, y, val_ratio):
     val_num = int(len(supports)*(1-val_ratio))
     return supports[:val_num], features[:val_num], y[:val_num, :],\
            supports[val_num:], features[val_num:], y[val_num:, :]
+
+
+def train_test_split_mlp(discrete_features, continuous_features, val_ratio):
+    num = int(continuous_features.shape[0]*(1-val_ratio))
+    discrete_features_train = {}
+    discrete_features_val = {}
+    for key, value in discrete_features.items():
+        discrete_features_train[key] = value[:num]
+        discrete_features_val[key] = value[num:]
+    return discrete_features_train, discrete_features_val, \
+        continuous_features[:num], continuous_features[num:]
