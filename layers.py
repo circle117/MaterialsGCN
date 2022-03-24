@@ -176,6 +176,25 @@ class Dense2(Layer):
         return self.act(output)
 
 
+class Embedding(Layer):
+    def __init__(self, input_dim, output_dim, **kwargs):
+        super(Embedding, self).__init__(**kwargs)
+
+        with tf.variable_scope(self.name + '_vars'):
+            self.vars['weights'] = glorot([input_dim, output_dim],
+                                          name='weights')
+
+        if self.logging:
+            self._log_vars()
+
+    def _call(self, inputs):
+        x = inputs
+
+        output = tf.nn.embedding_lookup(self.vars['weights'], x)
+
+        return output
+
+
 class GraphConvolution(Layer):
     """Graph convolution layer."""
     def __init__(self, input_dim, output_dim, placeholders, dropout=0.,
@@ -235,24 +254,5 @@ class GraphConvolution(Layer):
         # bias
         if self.bias:
             output += self.vars['bias']
-
-        return self.act(output)
-
-
-class MaxPooling(Layer):
-    def __init__(self, input_dim, output_dim, placeholders, sparse_inputs=False,
-                 act=tf.nn.relu, **kwargs):
-        super(MaxPooling, self).__init__(**kwargs)
-
-        self.act = act
-        self.sparse_inputs = sparse_inputs
-
-        if self.logging:
-            self._log_vars()
-
-    def _call(self, inputs):
-        x = inputs
-
-        output = tf.reduce_max(x)
 
         return self.act(output)

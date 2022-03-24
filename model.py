@@ -252,14 +252,16 @@ class GCN(Model):
 
 
 class MMGCN(Model):
-    def __init__(self, placeholders, input_dim, num_nodes, num_graphs, d_feature_name, **kwargs):
+    def __init__(self, placeholders, input_dim, num_nodes, num_graphs, d_feature_dim, **kwargs):
         super(MMGCN, self).__init__(**kwargs)
 
         # 特征
         self.gcn_inputs = placeholders['features']                              # GCN特征
         self.mlp_inputs_c = placeholders['con_features']                        # 连续特征
         self.mlp_inputs_d = {}                                                  # 离散特征
-        for name in d_feature_name:
+        self.mlp_inputs = []
+        self.d_feature_dim = d_feature_dim                                      # 离散特征名称及dim
+        for name, dim in self.d_feature_dim:
             self.mlp_inputs_d[name] = placeholders[name]
 
         # 层大小
@@ -267,11 +269,13 @@ class MMGCN(Model):
         self.num_nodes = num_nodes                                              # gcn节点数
         self.num_graphs = num_graphs                                            # GCN层数
         self.output_dim = placeholders['labels'].get_shape().as_list()[1]       # 输出大小
+        self.mlp_input_dim = placeholders['con_features'].get_shape().as_list()[1] + \
+                             FLAGS.embed_output1 + FLAGS.embed_output2 + FLAGS.embed_output3
 
         # 层list
         self.gcn_layers = []                                                    # GCN层
+        self.embedding_layers = {}                                              # Embedding层
         self.mlp_layers = []                                                    # MLP层
-        self.embedding_layer = []                                               # 离散数据的embedding
         self.fusion_layers = []                                                 # 融合层
 
         self.gcn_outputs = []                                                   # GCN每层输出
@@ -329,13 +333,49 @@ class MMGCN(Model):
                                       placeholders=self.placeholders,
                                       act=tf.nn.relu,
                                       dropout=True,
-                                      bias=True))
+                                      bias=True,
+                                      logging=self.logging))
+
+        """Embedding"""
+        self.embedding_layers[self.d_feature_dim[0][0]] = Dense1(
+            input_dim=self.d_feature_dim[0][1],
+            output_dim=FLAGS.embed_output1,
+            placeholders=self.placeholders,
+            act=lambda x: x,
+            dropout=False,
+            bias=False,
+            logging=self.logging
+        )
+
+        self.embedding_layers[self.d_feature_dim[1][0]] = Dense1(
+            input_dim=self.d_feature_dim[1][1],
+            output_dim=FLAGS.embed_output2,
+            placeholders=self.placeholders,
+            act=lambda x: x,
+            dropout=False,
+            bias=False,
+            logging=self.logging
+        )
+
+        self.embedding_layers[self.d_feature_dim[2][0]] = Dense1(
+            input_dim=self.d_feature_dim[2][1],
+            output_dim=FLAGS.embed_output3,
+            placeholders=self.placeholders,
+            act=lambda x:x,
+            dropout=False,
+            bias=False,
+            logging=self.logging
+        )
+
+        """MLP"""
 
     def build(self):
         with tf.variable_scope(self.name):
             self._build()
 
-        # Build sequential GCN layer model
+
+        # Build sequential layer model
+        """GCN"""
         self.gcn_outputs.append(self.gcn_inputs)
         for layer in self.gcn_layers:
             hidden = layer(self.gcn_outputs[-1])
@@ -351,6 +391,16 @@ class MMGCN(Model):
                 self.gcn_outputs.append(hidden)
         self.gcn_output = self.gcn_outputs[-1]
         self.gcn_output = tf.reshape(self.gcn_output, [1, self.num_nodes])
+
+        """Embedding"""
+        for name, dim in self.d_feature_dim:
+            self.mlp_inputs.append(self.embedding_layers[name](self.mlp_inputs_d[name]))
+        self.mlp_inputs.append(self.mlp_inputs_c)
+        self.mlp_inputs = tf.concat(self.mlp_inputs, axis=1)
+
+        """MLP"""
+
+
 
         # Store model variables for easy access
         variables = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope=self.name)
