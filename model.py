@@ -215,12 +215,6 @@ class GCN(Model):
                                       bias=True,
                                       logging=self.logging))
 
-        # self.layers.append(MaxPooling(input_dim=FLAGS.hidden2,
-        #                               output_dim=self.placeholders['labels'],
-        #                               placeholders=self.placeholders,
-        #                               act=lambda x: x,
-        #                               logging=self.logging))
-
     def build(self):
         with tf.variable_scope(self.name):
             self._build()
@@ -258,16 +252,32 @@ class GCN(Model):
 
 
 class MMGCN(Model):
-    def __init__(self, placeholders, input_dim, num_nodes, num_graphs, **kwargs):
+    def __init__(self, placeholders, input_dim, num_nodes, num_graphs, d_feature_name, **kwargs):
         super(MMGCN, self).__init__(**kwargs)
 
-        self.inputs = placeholders['features']
-        self.input_dim = input_dim                                              # 特征数
-        self.num_nodes = num_nodes                                              # 节点数
+        # 特征
+        self.gcn_inputs = placeholders['features']                              # GCN特征
+        self.mlp_inputs_c = placeholders['con_features']                        # 连续特征
+        self.mlp_inputs_d = {}                                                  # 离散特征
+        for name in d_feature_name:
+            self.mlp_inputs_d[name] = placeholders[name]
+
+        # 层大小
+        self.input_dim = input_dim                                              # gcn特征数
+        self.num_nodes = num_nodes                                              # gcn节点数
         self.num_graphs = num_graphs                                            # GCN层数
-        self.GCN_outputs = []
-        # self.input_dim = self.inputs.get_shape().as_list()[1]  # To be supported in future Tensorflow versions
-        self.output_dim = placeholders['labels'].get_shape().as_list()[1]       # 分类数
+        self.output_dim = placeholders['labels'].get_shape().as_list()[1]       # 输出大小
+
+        # 层list
+        self.gcn_layers = []                                                    # GCN层
+        self.mlp_layers = []                                                    # MLP层
+        self.embedding_layer = []                                               # 离散数据的embedding
+        self.fusion_layers = []                                                 # 融合层
+
+        self.gcn_outputs = []                                                   # GCN每层输出
+        self.gcn_output = None                                                  # GCN最终输出
+        self.mlp_outputs = []                                                   # MLP每层输出
+        self.mlp_output = None                                                  # MLP最终输出
         self.placeholders = placeholders
 
         self.optimizer = tf.train.AdamOptimizer(learning_rate=FLAGS.learning_rate)
@@ -287,105 +297,60 @@ class MMGCN(Model):
         self.accuracy = mean_absolute_error(self.outputs, self.placeholders['labels'])
 
     def _build(self):
+        """
+        build layers
+        :return:
+        """
+        """GCN"""
+        self.gcn_layers.append(GraphConvolution(input_dim=self.input_dim,
+                                                output_dim=FLAGS.gcn_hidden,
+                                                placeholders=self.placeholders,
+                                                act=tf.nn.relu,
+                                                dropout=False,
+                                                sparse_inputs=True,
+                                                logging=self.logging))
 
-        self.layers.append(GraphConvolution(input_dim=self.input_dim,
-                                            output_dim=FLAGS.hidden1,
-                                            placeholders=self.placeholders,
-                                            act=tf.nn.relu,
-                                            dropout=False,
-                                            sparse_inputs=True,
-                                            logging=self.logging))
+        self.gcn_layers.append(GraphConvolution(input_dim=FLAGS.gcn_hidden,
+                                                output_dim=FLAGS.gcn_hidden,
+                                                placeholders=self.placeholders,
+                                                act=tf.nn.relu,
+                                                dropout=False,
+                                                logging=self.logging))
 
-        self.layers.append(GraphConvolution(input_dim=FLAGS.hidden1,
-                                            output_dim=FLAGS.hidden2,
-                                            placeholders=self.placeholders,
-                                            act=tf.nn.relu,
-                                            dropout=False,
-                                            logging=self.logging))
+        self.gcn_layers.append(GraphConvolution(input_dim=FLAGS.gcn_hidden,
+                                                output_dim=FLAGS.gcn_hidden,
+                                                placeholders=self.placeholders,
+                                                act=tf.nn.relu,
+                                                dropout=False,
+                                                logging=self.logging))
 
-        self.layers.append(GraphConvolution(input_dim=FLAGS.hidden2,
-                                            output_dim=FLAGS.hidden3,
-                                            placeholders=self.placeholders,
-                                            act=tf.nn.relu,
-                                            dropout=False,
-                                            logging=self.logging))
-
-        if FLAGS.dense:
-            self.layers.append(Dense1(input_dim=FLAGS.hidden3,
+        self.gcn_layers.append(Dense1(input_dim=FLAGS.gcn_hidden,
                                       output_dim=self.output_dim,
                                       placeholders=self.placeholders,
                                       act=tf.nn.relu,
                                       dropout=True,
                                       bias=True))
-
-            self.layers.append(Dense2(input_dim=self.output_dim,
-                                      output_dim=self.num_nodes,
-                                      placeholders=self.placeholders,
-                                      act=lambda x: x,
-                                      bias=True))
-        else:
-            # self.layers.append(Dense1(input_dim=self.num_nodes*FLAGS.hidden3,
-            #                           output_dim=FLAGS.hidden4,
-            #                           placeholders=self.placeholders,
-            #                           act=tf.nn.relu,
-            #                           dropout=True,
-            #                           bias=True))
-
-            # self.layers.append(Dense1(input_dim=FLAGS.hidden4,
-            #                           output_dim=FLAGS.hidden5,
-            #                           placeholders=self.placeholders,
-            #                           act=tf.nn.relu,
-            #                           dropout=False,
-            #                           bias=True))
-            #
-            # self.layers.append(Dense1(input_dim=FLAGS.hidden5,
-            #                           output_dim=FLAGS.hidden6,
-            #                           placeholders=self.placeholders,
-            #                           act=tf.nn.relu,
-            #                           dropout=False,
-            #                           bias=True))
-            #
-            self.layers.append(Dense1(input_dim=FLAGS.hidden3,
-                                      output_dim=self.output_dim,
-                                      placeholders=self.placeholders,
-                                      act=tf.nn.relu,
-                                      dropout=True,
-                                      bias=True))
-
-            self.layers.append(Dense2(input_dim=self.output_dim,
-                                      output_dim=self.num_nodes,
-                                      placeholders=self.placeholders,
-                                      act=lambda x: x,
-                                      dropout=False,
-                                      bias=True))
-
-        # self.layers.append(MaxPooling(input_dim=FLAGS.hidden2,
-        #                               output_dim=self.placeholders['labels'],
-        #                               placeholders=self.placeholders,
-        #                               act=lambda x: x,
-        #                               logging=self.logging))
 
     def build(self):
         with tf.variable_scope(self.name):
             self._build()
 
-        # Build sequential layer model
-        self.activations.append(self.inputs)
-        for layer in self.layers:
-            hidden = layer(self.activations[-1])
-            self.activations.append(hidden)
-            if (not FLAGS.dense) and len(self.GCN_outputs) < self.num_graphs:
-                self.GCN_outputs.append(hidden)
-            if (not FLAGS.dense) and len(self.activations)-1 == self.num_graphs:
-                GCN_outputs = tf.stack(self.GCN_outputs, axis=1)
-                GCN_outputs = tf.reshape(GCN_outputs, [1, self.num_graphs, self.num_nodes, FLAGS.hidden1])
-                hidden = tf.nn.max_pool(GCN_outputs,
+        # Build sequential GCN layer model
+        self.gcn_outputs.append(self.gcn_inputs)
+        for layer in self.gcn_layers:
+            hidden = layer(self.gcn_outputs[-1])
+            self.gcn_outputs.append(hidden)
+            if len(self.gcn_outputs)-1 == self.num_graphs:
+                gcn_output = tf.stack(self.gcn_outputs[1:], axis=1)             # 除掉输入
+                gcn_output = tf.reshape(gcn_output, [1, self.num_graphs, self.num_nodes, FLAGS.gcn_hidden])
+                hidden = tf.nn.max_pool(gcn_output,
                                         ksize=[1, self.num_graphs, 1, 1],
                                         strides=[1, 1, 1, 1],
                                         padding='VALID')
-                hidden = tf.reshape(hidden, [self.num_nodes, FLAGS.hidden3])
-                self.activations.append(hidden)
-        self.outputs = self.activations[-1]
+                hidden = tf.reshape(hidden, [self.num_nodes, FLAGS.gcn_hidden])
+                self.gcn_outputs.append(hidden)
+        self.gcn_output = self.gcn_outputs[-1]
+        self.gcn_output = tf.reshape(self.gcn_output, [1, self.num_nodes])
 
         # Store model variables for easy access
         variables = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope=self.name)

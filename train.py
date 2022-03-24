@@ -1,7 +1,7 @@
 import tensorflow._api.v2.compat.v1 as tf
 from MyUtils import *
 from utils import *
-from model import GCN, MLP
+from model import GCN, MLP, MMGCN
 import time
 import random
 
@@ -28,15 +28,12 @@ FLAGS = flags.FLAGS
 flags.DEFINE_string('dataset', './Dataset_test/data_Method2.csv', 'Dataset string.')       # 'cora', 'citeseer', 'pubmed'
 flags.DEFINE_float('val_ratio', 0.2, 'Ratio of validation dataset')
 # GCN
-flags.DEFINE_string('model', 'gcn_cheby', 'Model string.')      # 'gcn', 'gcn_cheby', 'dense'
+flags.DEFINE_string('model', 'mmgcn', 'Model string.')      # 'gcn', 'gcn_cheby', 'dense'
 flags.DEFINE_float('learning_rate', 0.01, 'Initial learning rate.')
 flags.DEFINE_integer('epochs', 500, 'Number of epochs to train.')
-flags.DEFINE_boolean('dense', False, 'dense or pooling')            # pooling每个hidden相等
-flags.DEFINE_integer('hidden1', 128, 'Number of units in hidden layer 1.')
-flags.DEFINE_integer('hidden2', 128, 'Number of units in hidden layer 2.')
-flags.DEFINE_integer('hidden3', 128, 'Number of units in hidden layer 3.')
+flags.DEFINE_integer('gcn_hidden', 128, 'Number of units in GCN hidden layer .')
 flags.DEFINE_integer('num_graphs', 3, 'Number of units in hidden layer 3.')
-flags.DEFINE_float('dropout', 0.25, 'Dropout rate (1 - keep probability).')
+flags.DEFINE_float('dropout', 0.3, 'Dropout rate (1 - keep probability).')
 flags.DEFINE_float('weight_decay', 5e-2, 'Weight for L2 loss on embedding matrix.')
 flags.DEFINE_integer('early_stopping', 20, 'Tolerance for early stopping (# of epochs).')
 flags.DEFINE_integer('max_degree', 2, 'Maximum Chebyshev polynomial degree.')
@@ -73,6 +70,13 @@ elif FLAGS.model == 'dense':
         supports.append([preprocess_adj(adj)])  # Not used
     num_supports = 1
     model_func = MLP
+elif FLAGS.model == 'mmgcn':
+    supports = []
+    print("Calculating Chebyshev polynomials up to order {}...".format(FLAGS.max_degree))
+    for adj in adjs:
+        supports.append(chebyshev_polynomials(adj, FLAGS.max_degree))
+    num_supports = 1 + FLAGS.max_degree
+    model_func = MMGCN
 else:
     raise ValueError('Invalid argument for model: ' + str(FLAGS.model))
 
@@ -86,24 +90,30 @@ discrete_features_train, discrete_features_val, continuous_features_train, conti
     train_test_split_mlp(discrete_features, continuous_features, FLAGS.val_ratio)
 list_for_shuffle = list(range(len(supports_train)))
 
-# # Define placeholders
-# placeholders = {
-#     # T_k的数量，相当于Sum的参数beta
-#     'support': [tf.sparse_placeholder(tf.float32) for _ in range(num_supports)],
-#     # 特征：节点数, 特征数
-#     'features': tf.sparse_placeholder(tf.float32, shape=tf.constant(gcn_features[0][2], dtype=tf.int64)),
-#     # 节点的label
-#     'labels': tf.placeholder(tf.float32, shape=(None, y.shape[1])),
-#     # 'labels_mask': tf.placeholder(tf.int32),
-#     'dropout': tf.placeholder_with_default(0., shape=()),
-#     # helper variable for sparse dropout
-#     'num_features_nonzero': tf.placeholder(tf.int32)
-# }
-#
-# # Create model: input_dim = features size
-# model = model_func(placeholders, input_dim=gcn_features[0][2][1], num_nodes=gcn_features[0][2][0],
-#                    num_graphs=FLAGS.num_graphs, logging=True)
-#
+# Define placeholders
+placeholders = {
+    # T_k的数量，相当于Sum的参数beta
+    'support': [tf.sparse_placeholder(tf.float32) for _ in range(num_supports)],
+    # 特征：节点数, 特征数
+    'features': tf.sparse_placeholder(tf.float32, shape=tf.constant(gcn_features[0][2], dtype=tf.int64)),
+    # 节点的label
+    'labels': tf.placeholder(tf.float32, shape=(None, y.shape[1])),
+    # 连续特征
+    'con_features': tf.placeholder(tf.float32, shape=(None, continuous_features.shape[1])),
+    # dropout的比例
+    'dropout': tf.placeholder_with_default(0., shape=()),
+    # helper variable for sparse dropout
+    'num_features_nonzero': tf.placeholder(tf.int32)
+}
+
+for key, value in discrete_features.items():
+    placeholders[key] = tf.placeholder(tf.float32, shape=(None, value.shape[1]))
+
+
+# Create model: input_dim = features size
+model = model_func(placeholders, input_dim=gcn_features[0][2][1], num_nodes=gcn_features[0][2][0],
+                   num_graphs=FLAGS.num_graphs, d_feature_name=FEATURE_NAME[0], logging=True)
+
 # sess = tf.Session()
 #
 # def evaluate(features, supports, y, placeholders):
