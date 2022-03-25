@@ -33,20 +33,21 @@ flags.DEFINE_float('learning_rate', 0.01, 'Initial learning rate.')
 flags.DEFINE_integer('epochs', 500, 'Number of epochs to train.')
 flags.DEFINE_float('dropout', 0.3, 'Dropout rate (1 - keep probability).')
 flags.DEFINE_float('weight_decay', 5e-2, 'Weight for L2 loss on embedding matrix.')
-flags.DEFINE_integer('early_stopping', 20, 'Tolerance for early stopping (# of epochs).')
+flags.DEFINE_integer('early_stopping', 50, 'Tolerance for early stopping (# of epochs).')
 # GCN
-flags.DEFINE_integer('gcn_hidden', 128, 'Number of units in GCN hidden layer .')
+flags.DEFINE_integer('gcn_hidden', 64, 'Number of units in GCN hidden layer .')
 flags.DEFINE_integer('num_graphs', 3, 'Number of units in hidden layer 3.')
 flags.DEFINE_integer('max_degree', 2, 'Maximum Chebyshev polynomial degree.')
-flags.DEFINE_integer('gcn_dense', 16, 'Number of units in GCN dense Layer')
+flags.DEFINE_boolean('gcn_dense', False, 'If do gcn dense')
+flags.DEFINE_integer('gcn_dense_hidden', 32, 'Number of units in GCN dense Layer')
 # Embedding
 flags.DEFINE_integer('embed_output1', 1, 'Number of units in Embedding1 layer')         # Solvent
 flags.DEFINE_integer('embed_output2', 3, 'Number of units in Embedding2 layer')         # Temperature1
 flags.DEFINE_integer('embed_output3', 2, 'Number of units in Embedding3 layer')         # Method2
 # MLP
-flags.DEFINE_integer('mlp_hidden1', 64, 'Number of units in MLP hidden layer1')
-flags.DEFINE_integer('mlp_hidden2', 128, 'Number of units in MLP hidden layer2')
-flags.DEFINE_integer('mlp_hidden3', 64, 'Number of units in MLP hidden layer3')
+flags.DEFINE_integer('mlp_hidden1', 32, 'Number of units in MLP hidden layer1')
+flags.DEFINE_integer('mlp_hidden2', 64, 'Number of units in MLP hidden layer2')
+flags.DEFINE_integer('mlp_hidden3', 32, 'Number of units in MLP hidden layer3')
 # Fusion
 flags.DEFINE_integer('fusion_hidden1', 64, 'Number of units in Fusion hidden layer1')
 flags.DEFINE_integer('fusion_hidden2', 32, 'Number of units in Fusion hidden layer2')
