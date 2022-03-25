@@ -338,7 +338,7 @@ class MMGCN(Model):
                                       logging=self.logging))
 
         self.gcn_layers.append(Dense1(input_dim=self.num_nodes,
-                                      output_dim=FLAGS.gcn_dense,
+                                      output_dim=FLAGS.gcn_dense_hidden,
                                       placeholders=self.placeholders,
                                       act=tf.nn.relu,
                                       dropout=False,
@@ -403,7 +403,11 @@ class MMGCN(Model):
 
 
         """Fusion"""
-        self.fusion_layers.append(Dense1(input_dim=FLAGS.mlp_hidden3+FLAGS.gcn_dense,
+        if FLAGS.gcn_dense:
+            fusion_input_dim = FLAGS.mlp_hidden3+FLAGS.gcn_dense_hidden
+        else:
+            fusion_input_dim = FLAGS.mlp_hidden3+self.num_nodes
+        self.fusion_layers.append(Dense1(input_dim=fusion_input_dim,
                                       output_dim=FLAGS.fusion_hidden1,
                                       placeholders=self.placeholders,
                                       act=tf.nn.relu,
@@ -449,7 +453,8 @@ class MMGCN(Model):
                 self.gcn_outputs.append(hidden)
         self.gcn_output = self.gcn_outputs[-1]
         self.gcn_output = tf.reshape(self.gcn_output, [1, self.num_nodes])
-        self.gcn_output = self.gcn_layers[-1](self.gcn_output)
+        if FLAGS.gcn_dense:
+            self.gcn_output = self.gcn_layers[-1](self.gcn_output)
 
         """Embedding"""
         for name, dim in self.d_feature_dim:
