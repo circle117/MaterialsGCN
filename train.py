@@ -38,18 +38,18 @@ flags.DEFINE_integer('early_stopping', 20, 'Tolerance for early stopping (# of e
 flags.DEFINE_integer('gcn_hidden', 128, 'Number of units in GCN hidden layer .')
 flags.DEFINE_integer('num_graphs', 3, 'Number of units in hidden layer 3.')
 flags.DEFINE_integer('max_degree', 2, 'Maximum Chebyshev polynomial degree.')
-flags.DEFINE_integer('gcn_dense', 16,'Number of units in GCN dense Layer')
+flags.DEFINE_integer('gcn_dense', 16, 'Number of units in GCN dense Layer')
 # Embedding
 flags.DEFINE_integer('embed_output1', 1, 'Number of units in Embedding1 layer')         # Solvent
 flags.DEFINE_integer('embed_output2', 3, 'Number of units in Embedding2 layer')         # Temperature1
 flags.DEFINE_integer('embed_output3', 2, 'Number of units in Embedding3 layer')         # Method2
 # MLP
-flags.DEFINE_integer('mlp_hidden1', 16, 'Number of units in MLP hidden layer1')
-flags.DEFINE_integer('mlp_hidden2', 32, 'Number of units in MLP hidden layer2')
-flags.DEFINE_integer('mlp_hidden3', 16, 'Number of units in MLP hidden layer3')
+flags.DEFINE_integer('mlp_hidden1', 64, 'Number of units in MLP hidden layer1')
+flags.DEFINE_integer('mlp_hidden2', 128, 'Number of units in MLP hidden layer2')
+flags.DEFINE_integer('mlp_hidden3', 64, 'Number of units in MLP hidden layer3')
 # Fusion
 flags.DEFINE_integer('fusion_hidden1', 64, 'Number of units in Fusion hidden layer1')
-flags.DEFINE_integer('fusion_hidden2', 128, 'Number of units in Fusion hidden layer2')
+flags.DEFINE_integer('fusion_hidden2', 32, 'Number of units in Fusion hidden layer2')
 
 
 # load_data
@@ -131,54 +131,61 @@ for name in FEATURE_NAME[0]:
 model = model_func(placeholders, input_dim=gcn_features[0][2][1], num_nodes=gcn_features[0][2][0],
                    num_graphs=FLAGS.num_graphs, d_feature_dim=d_feature_dim, logging=True)
 
-# sess = tf.Session()
-#
-# def evaluate(features, supports, y, placeholders):
-#     loss = []
-#     accu = []
-#     for i in range(len(features)):
-#         feed_dict_val = construct_feed_dict(features[i], supports[i], y[i].reshape((-1, 1)), placeholders)
-#         outs = sess.run([model.loss, model.accuracy], feed_dict=feed_dict_val)
-#         loss.append(outs[0])
-#         accu.append(outs[1])
-#     return np.mean(loss), np.mean(accu)
-#
-# sess.run(tf.global_variables_initializer())
-#
-# saver = tf.train.Saver()
-#
-# val_record = []
-# for epoch in range(FLAGS.epochs):
-#
-#     t = time.time()
-#
-#     # trian
-#     loss = []
-#     accu = []
-#     for i in list_for_shuffle:
-#         feed_dict = construct_feed_dict(features_train[i], supports_train[i], y_train[i, :].reshape((-1, 1)), placeholders)
-#         feed_dict.update({placeholders['dropout']: FLAGS.dropout})
-#
-#         outs = sess.run([model.opt_op, model.loss, model.accuracy], feed_dict=feed_dict)
-#         loss.append(outs[1])
-#         accu.append(outs[2])
-#     loss_train = np.mean(loss)
-#     accu_train = np.mean(accu)
-#
-#     #val
-#     loss_val, accu_val = evaluate(features_val, supports_val, y_val, placeholders)
-#     val_record.append(accu_val)
-#
-#     print("Epoch:", '%04d' % (epoch + 1), "train_loss=", "{:.5f}".format(loss_train),
-#           "train_acc=", "{:.5f}".format(accu_train), "val_loss=", "{:.5f}".format(loss_val),
-#           "val_acc=", "{:.5f}".format(accu_val), "time=", "{:.5f}".format(time.time() - t))
-#
-#     random.shuffle(list_for_shuffle)                        # 每个epoch结束后，shuffle
-#
-#     if epoch>FLAGS.early_stopping and val_record[-1]>np.mean(val_record[-(FLAGS.early_stopping+1):-1]):
-#         print('Early stopping...')
-#         break
-#     else:
-#         save_path = saver.save(sess, "./my_model/temp.ckpt")
-#
-# print("Save to path:", save_path)
+sess = tf.Session()
+
+def evaluate(features, supports, y, con_features, dis_features, placeholders):
+    loss = []
+    accu = []
+    for i in range(len(features)):
+        feed_dict_val = my_construct_feed_dict(features[i], supports[i], y[i].reshape((-1, 1)),
+                                               continuous_features_val[i].reshape((1, -1)),
+                                               discrete_features_val, i,
+                                               placeholders)
+        outs = sess.run([model.loss, model.accuracy], feed_dict=feed_dict_val)
+        loss.append(outs[0])
+        accu.append(outs[1])
+    return np.mean(loss), np.mean(accu)
+
+sess.run(tf.global_variables_initializer())
+
+saver = tf.train.Saver()
+
+val_record = []
+for epoch in range(FLAGS.epochs):
+
+    t = time.time()
+
+    # trian
+    loss = []
+    accu = []
+    for i in list_for_shuffle:
+        feed_dict = my_construct_feed_dict(gcn_features_train[i], supports_train[i], y_train[i, :].reshape((-1, 1)),
+                                        continuous_features_train[i].reshape((1, -1)), discrete_features_train, i,
+                                        placeholders)
+        feed_dict.update({placeholders['dropout']: FLAGS.dropout})
+
+        outs = sess.run([model.opt_op, model.loss, model.accuracy], feed_dict=feed_dict)
+        loss.append(outs[1])
+        accu.append(outs[2])
+    loss_train = np.mean(loss)
+    accu_train = np.mean(accu)
+
+    #val
+    loss_val, accu_val = evaluate(features_val, supports_val, y_val,
+                                  continuous_features_val, discrete_features_val,
+                                  placeholders)
+    val_record.append(accu_val)
+
+    print("Epoch:", '%04d' % (epoch + 1), "train_loss=", "{:.5f}".format(loss_train),
+          "train_acc=", "{:.5f}".format(accu_train), "val_loss=", "{:.5f}".format(loss_val),
+          "val_acc=", "{:.5f}".format(accu_val), "time=", "{:.5f}".format(time.time() - t))
+
+    random.shuffle(list_for_shuffle)                        # 每个epoch结束后，shuffle
+
+    if epoch>FLAGS.early_stopping and val_record[-1]>np.mean(val_record[-(FLAGS.early_stopping+1):-1]):
+        print('Early stopping...')
+        break
+    else:
+        save_path = saver.save(sess, "./my_model/temp.ckpt")
+
+print("Save to path:", save_path)

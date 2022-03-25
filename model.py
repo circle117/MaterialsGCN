@@ -292,12 +292,11 @@ class MMGCN(Model):
 
     def _loss(self):
         # Weight decay loss
-        for var in self.layers[0].vars.values():
+        for var in self.gcn_layers[0].vars.values():
             self.loss += FLAGS.weight_decay * tf.nn.l2_loss(var)
 
-        # Mean square error
+        # Mean absolute error
         self.loss += mean_absolute_error(self.outputs, self.placeholders['labels'])
-        print('a')
 
     def _accuracy(self):
         self.accuracy = mean_absolute_error(self.outputs, self.placeholders['labels'])
@@ -401,6 +400,7 @@ class MMGCN(Model):
                                       dropout=False,
                                       bias=True,
                                       logging=self.logging))
+
 
         """Fusion"""
         self.fusion_layers.append(Dense1(input_dim=FLAGS.mlp_hidden3+FLAGS.gcn_dense,

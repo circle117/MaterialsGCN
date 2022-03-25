@@ -108,7 +108,6 @@ def load_data(dataset, feature_map, feature_name):
     return adjs, features, y, discrete_features, continuous_features
 
 
-
 def train_test_split_gcn(supports, features, y, val_ratio):
     val_num = int(len(supports)*(1-val_ratio))
     return supports[:val_num], features[:val_num], y[:val_num, :],\
@@ -124,3 +123,15 @@ def train_test_split_mlp(discrete_features, continuous_features, val_ratio):
         discrete_features_val[key] = value[num:]
     return discrete_features_train, discrete_features_val, \
         continuous_features[:num], continuous_features[num:]
+
+
+def my_construct_feed_dict(gcn_feature, support, y, con_feature, dis_feature, index, placeholders):
+    feed_dict = {}
+    feed_dict.update({placeholders['support'][i]: support[i] for i in range(len(support))})
+    feed_dict.update({placeholders['features']: gcn_feature})
+    feed_dict.update({placeholders['labels']: y})
+    feed_dict.update({placeholders['con_features']: con_feature})
+    feed_dict.update({placeholders['num_features_nonzero']: gcn_feature[1].shape})
+    for key, value in dis_feature.items():
+        feed_dict.update({placeholders[key]: value[index].reshape((1, -1))})
+    return feed_dict
