@@ -259,7 +259,8 @@ class MMGCN(Model):
         self.gcn_inputs = placeholders['features']                              # GCN特征
         self.mlp_inputs_c = placeholders['con_features']                        # 连续特征
         self.mlp_inputs_d = {}                                                  # 离散特征
-        self.mlp_inputs = []
+        self.mlp_inputs = []                                                    # mlp特征
+        self.fusion_inputs = None                                               # fusion特征
         self.d_feature_dim = d_feature_dim                                      # 离散特征名称及dim
         for name, dim in self.d_feature_dim:
             self.mlp_inputs_d[name] = placeholders[name]
@@ -282,6 +283,7 @@ class MMGCN(Model):
         self.gcn_output = None                                                  # GCN最终输出
         self.mlp_outputs = []                                                   # MLP每层输出
         self.mlp_output = None                                                  # MLP最终输出
+        self.fusion_outputs = []                                                # Fusion输出
         self.placeholders = placeholders
 
         self.optimizer = tf.train.AdamOptimizer(learning_rate=FLAGS.learning_rate)
@@ -336,6 +338,14 @@ class MMGCN(Model):
                                       bias=True,
                                       logging=self.logging))
 
+        self.gcn_layers.append(Dense1(input_dim=self.num_nodes,
+                                      output_dim=FLAGS.gcn_dense,
+                                      placeholders=self.placeholders,
+                                      act=tf.nn.relu,
+                                      dropout=False,
+                                      bias=True,
+                                      logging=self.logging))
+
         """Embedding"""
         self.embedding_layers[self.d_feature_dim[0][0]] = Dense1(
             input_dim=self.d_feature_dim[0][1],
@@ -368,6 +378,54 @@ class MMGCN(Model):
         )
 
         """MLP"""
+        self.mlp_layers.append(Dense1(input_dim=self.mlp_input_dim,
+                                      output_dim=FLAGS.mlp_hidden1,
+                                      placeholders=self.placeholders,
+                                      act=tf.nn.relu,
+                                      dropout=False,
+                                      bias=True,
+                                      logging=self.logging))
+
+        self.mlp_layers.append(Dense1(input_dim=FLAGS.mlp_hidden1,
+                                      output_dim=FLAGS.mlp_hidden2,
+                                      placeholders=self.placeholders,
+                                      act=tf.nn.relu,
+                                      dropout=False,
+                                      bias=True,
+                                      logging=self.logging))
+
+        self.mlp_layers.append(Dense1(input_dim=FLAGS.mlp_hidden2,
+                                      output_dim=FLAGS.mlp_hidden3,
+                                      placeholders=self.placeholders,
+                                      act=tf.nn.relu,
+                                      dropout=False,
+                                      bias=True,
+                                      logging=self.logging))
+
+        """Fusion"""
+        self.fusion_layers.append(Dense1(input_dim=FLAGS.mlp_hidden3+FLAGS.gcn_dense,
+                                      output_dim=FLAGS.fusion_hidden1,
+                                      placeholders=self.placeholders,
+                                      act=tf.nn.relu,
+                                      dropout=False,
+                                      bias=True,
+                                      logging=self.logging))
+
+        self.fusion_layers.append(Dense1(input_dim=FLAGS.fusion_hidden1,
+                                         output_dim=FLAGS.fusion_hidden2,
+                                         placeholders=self.placeholders,
+                                         act=tf.nn.relu,
+                                         dropout=False,
+                                         bias=True,
+                                         logging=self.logging))
+
+        self.fusion_layers.append(Dense1(input_dim=FLAGS.fusion_hidden2,
+                                         output_dim=self.output_dim,
+                                         placeholders=self.placeholders,
+                                         act=tf.nn.relu,
+                                         dropout=False,
+                                         bias=True,
+                                         logging=self.logging))
 
     def build(self):
         with tf.variable_scope(self.name):
@@ -377,7 +435,7 @@ class MMGCN(Model):
         # Build sequential layer model
         """GCN"""
         self.gcn_outputs.append(self.gcn_inputs)
-        for layer in self.gcn_layers:
+        for layer in self.gcn_layers[:-1]:
             hidden = layer(self.gcn_outputs[-1])
             self.gcn_outputs.append(hidden)
             if len(self.gcn_outputs)-1 == self.num_graphs:
@@ -391,6 +449,7 @@ class MMGCN(Model):
                 self.gcn_outputs.append(hidden)
         self.gcn_output = self.gcn_outputs[-1]
         self.gcn_output = tf.reshape(self.gcn_output, [1, self.num_nodes])
+        self.gcn_output = self.gcn_layers[-1](self.gcn_output)
 
         """Embedding"""
         for name, dim in self.d_feature_dim:
@@ -399,7 +458,20 @@ class MMGCN(Model):
         self.mlp_inputs = tf.concat(self.mlp_inputs, axis=1)
 
         """MLP"""
+        self.mlp_outputs.append(self.mlp_inputs)
+        for layer in self.mlp_layers:
+            hidden = layer(self.mlp_outputs[-1])
+            self.mlp_outputs.append(hidden)
+        self.mlp_output = self.mlp_outputs[-1]
 
+        self.fusion_inputs = tf.concat([self.gcn_output, self.mlp_output], axis=1)
+
+        """Fusion"""
+        self.fusion_outputs.append(self.fusion_inputs)
+        for layer in self.fusion_layers:
+            hidden = layer(self.fusion_outputs[-1])
+            self.fusion_outputs.append(hidden)
+        self.outputs = self.fusion_outputs[-1]
 
 
         # Store model variables for easy access
