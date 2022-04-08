@@ -7,7 +7,7 @@ import random
 
 tf.disable_v2_behavior()
 
-FEATURE_LIST = ['*', 'C', 'N', 'O', 'F', 'S',               # 原子类别
+FEATURE_LIST = ['*', 'C', 'N', 'O', 'F', 'S', 'Si',          # 原子类别
                 'H0', 'H1', 'H2', 'H3',                     # 连接H数量
                 'D1', 'D2', 'D3', 'D4',                     # Degree
                 'A0', 'A1',                                 # 芳香性
@@ -22,19 +22,17 @@ tf.set_random_seed(seed)
 # Settings
 flags = tf.app.flags
 FLAGS = flags.FLAGS
-flags.DEFINE_string('dataset', './Dataset_test/data_Method0.csv', 'Dataset string.')       # 'cora', 'citeseer', 'pubmed'
+flags.DEFINE_string('dataset', './dataset/dataMethod2Deleted.csv', 'Dataset string.')
 flags.DEFINE_float('val_ratio', 0.2, 'Ratio of validation dataset')
 flags.DEFINE_string('model', 'gcn_cheby', 'Model string.')      # 'gcn', 'gcn_cheby', 'dense'
 flags.DEFINE_float('learning_rate', 0.01, 'Initial learning rate.')
 flags.DEFINE_integer('epochs', 200, 'Number of epochs to train.')
 flags.DEFINE_boolean('dense', False, 'dense or pooling')            # pooling每个hidden相等
-flags.DEFINE_integer('hidden1', 128, 'Number of units in hidden layer 1.')
-flags.DEFINE_integer('hidden2', 128, 'Number of units in hidden layer 2.')
-flags.DEFINE_integer('hidden3', 128, 'Number of units in hidden layer 3.')
-flags.DEFINE_integer('num_graphs', 3, 'Number of units in hidden layer 3.')
+flags.DEFINE_integer('hidden', 64, 'Number of units in hidden layer 1.')
+flags.DEFINE_integer('num_graphs', 5, 'Number of units in hidden layer 3.')
 flags.DEFINE_float('dropout', 0.3, 'Dropout rate (1 - keep probability).')
-flags.DEFINE_float('weight_decay', 5e-2, 'Weight for L2 loss on embedding matrix.')
-flags.DEFINE_integer('early_stopping', 20, 'Tolerance for early stopping (# of epochs).')
+flags.DEFINE_float('weight_decay', 5e-1, 'Weight for L2 loss on embedding matrix.')
+flags.DEFINE_integer('early_stopping', 10, 'Tolerance for early stopping (# of epochs).')
 flags.DEFINE_integer('max_degree', 2, 'Maximum Chebyshev polynomial degree.')
 
 
