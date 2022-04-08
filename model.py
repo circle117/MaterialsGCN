@@ -156,7 +156,6 @@ class GCN(Model):
         # Mean square error
         self.loss += mean_absolute_error(self.outputs, self.placeholders['labels'])
             # tf.losses.mean_squared_error(self.outputs, self.placeholders['labels'])
-        print('a')
 
     def _accuracy(self):
         self.accuracy = mean_absolute_error(self.outputs, self.placeholders['labels'])
@@ -185,6 +184,20 @@ class GCN(Model):
                                             dropout=False,
                                             logging=self.logging))
 
+        self.layers.append(GraphConvolution(input_dim=FLAGS.hidden3,
+                                            output_dim=FLAGS.hidden4,
+                                            placeholders=self.placeholders,
+                                            act=tf.nn.relu,
+                                            dropout=False,
+                                            logging=self.logging))
+
+        self.layers.append(GraphConvolution(input_dim=FLAGS.hidden4,
+                                            output_dim=FLAGS.hidden5,
+                                            placeholders=self.placeholders,
+                                            act=tf.nn.relu,
+                                            dropout=False,
+                                            logging=self.logging))
+
         if FLAGS.dense:
             self.layers.append(Dense1(input_dim=FLAGS.hidden3,
                                       output_dim=self.output_dim,
@@ -199,7 +212,7 @@ class GCN(Model):
                                       act=lambda x: x,
                                       bias=True))
         else:
-            self.layers.append(Dense1(input_dim=FLAGS.hidden3,
+            self.layers.append(Dense1(input_dim=FLAGS.hidden5,
                                       output_dim=self.output_dim,
                                       placeholders=self.placeholders,
                                       act=tf.nn.relu,
