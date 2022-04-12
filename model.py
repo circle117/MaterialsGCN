@@ -59,7 +59,7 @@ class Model(object):
 
         self.opt_op = self.optimizer.minimize(self.loss)
 
-    def predict(self):
+    def predict(self, output):
         pass
 
     def _loss(self):
@@ -137,11 +137,12 @@ class GCN(Model):
 
         self.inputs = placeholders['features']
         self.input_dim = input_dim                                              # 特征数
+        self.outputs = []                                                       # batch输出
         self.num_nodes = num_nodes                                              # 节点数
         self.num_graphs = num_graphs                                            # GCN层数
         self.GCN_outputs = []
         # self.input_dim = self.inputs.get_shape().as_list()[1]  # To be supported in future Tensorflow versions
-        self.output_dim = placeholders['labels'].get_shape().as_list()[1]       # 分类数
+        self.output_dim = placeholders['labels'][0].get_shape().as_list()[1]       # 分类数
         self.placeholders = placeholders
 
         self.optimizer = tf.train.AdamOptimizer(learning_rate=FLAGS.learning_rate)
@@ -151,10 +152,11 @@ class GCN(Model):
     def _loss(self):
         # Weight decay loss
         for var in self.layers[0].vars.values():
+            # print(var)
             self.loss += FLAGS.weight_decay * tf.nn.l2_loss(var)
 
-        # Mean square error
-        self.loss += mean_absolute_error(self.outputs, self.placeholders['labels'])
+        # Mean absolute error
+        self.loss += self.accuracy
             # tf.losses.mean_squared_error(self.outputs, self.placeholders['labels'])
 
     def _accuracy(self):
@@ -213,35 +215,37 @@ class GCN(Model):
             self._build()
 
         # Build sequential layer model
-        self.activations.append(self.inputs)
-        for layer in self.layers:
-            hidden = layer(self.activations[-1])
-            self.activations.append(hidden)
-            if (not FLAGS.dense) and len(self.GCN_outputs) < self.num_graphs:
-                self.GCN_outputs.append(hidden)
-            if (not FLAGS.dense) and len(self.activations)-1 == self.num_graphs:
-                GCN_outputs = tf.stack(self.GCN_outputs, axis=1)
-                GCN_outputs = tf.reshape(GCN_outputs, [1, self.num_graphs, self.num_nodes, FLAGS.hidden])
-                hidden = tf.nn.max_pool(GCN_outputs,
-                                        ksize=[1, self.num_graphs, 1, 1],
-                                        strides=[1, 1, 1, 1],
-                                        padding='VALID')
-                hidden = tf.reshape(hidden, [self.num_nodes, FLAGS.hidden])
+        for i in range(FLAGS.batchSize):
+            self.activations = [self.inputs[i]]
+            self.GCN_outputs = []
+            for layer in self.layers:
+                hidden = layer(self.activations[-1], i)
                 self.activations.append(hidden)
-        self.outputs = self.activations[-1]
+                if (not FLAGS.dense) and len(self.GCN_outputs) < self.num_graphs:
+                    self.GCN_outputs.append(hidden)
+                if (not FLAGS.dense) and len(self.activations)-1 == self.num_graphs:
+                    GCN_outputs = tf.stack(self.GCN_outputs, axis=1)
+                    GCN_outputs = tf.reshape(GCN_outputs, [1, self.num_graphs, self.num_nodes, FLAGS.hidden])
+                    hidden = tf.nn.max_pool(GCN_outputs,
+                                            ksize=[1, self.num_graphs, 1, 1],
+                                            strides=[1, 1, 1, 1],
+                                            padding='VALID')
+                    hidden = tf.reshape(hidden, [self.num_nodes, FLAGS.hidden])
+                    self.activations.append(hidden)
+            self.outputs.append(self.predict(self.activations[-1]))
 
         # Store model variables for easy access
         variables = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope=self.name)
         self.vars = {var.name: var for var in variables}
 
         # Build metrics
-        self._loss()
         self._accuracy()
+        self._loss()
 
         self.opt_op = self.optimizer.minimize(self.loss)
 
-    def predict(self):
-        return tf.nn.softplus(self.outputs)
+    def predict(self, outputs):
+        return tf.nn.softplus(outputs)
 
 
 class MMGCN(Model):
@@ -482,5 +486,5 @@ class MMGCN(Model):
 
         self.opt_op = self.optimizer.minimize(self.loss)
 
-    def predict(self):
-        return tf.nn.softplus(self.outputs)
+    def predict(self, output):
+        return tf.nn.softplus(output)

@@ -23,16 +23,18 @@ tf.set_random_seed(seed)
 flags = tf.app.flags
 FLAGS = flags.FLAGS
 flags.DEFINE_string('dataset', './dataset/dataMethod2Deleted.csv', 'Dataset string.')
-flags.DEFINE_float('val_ratio', 0.2, 'Ratio of validation dataset')
+flags.DEFINE_float('val_ratio', 0.1, 'Ratio of validation dataset')
+flags.DEFINE_float('test_ratio', 0.1, 'Ratio of test dataset')
 flags.DEFINE_string('model', 'gcn_cheby', 'Model string.')      # 'gcn', 'gcn_cheby', 'dense'
-flags.DEFINE_float('learning_rate', 0.01, 'Initial learning rate.')
+flags.DEFINE_float('learning_rate', 0.1, 'Initial learning rate.')
 flags.DEFINE_integer('epochs', 200, 'Number of epochs to train.')
+flags.DEFINE_integer('batchSize', 16, 'Number of batches to train')
 flags.DEFINE_boolean('dense', False, 'dense or pooling')            # pooling每个hidden相等
 flags.DEFINE_integer('hidden', 64, 'Number of units in hidden layer 1.')
 flags.DEFINE_integer('num_graphs', 5, 'Number of units in hidden layer 3.')
 flags.DEFINE_float('dropout', 0.3, 'Dropout rate (1 - keep probability).')
 flags.DEFINE_float('weight_decay', 5e-1, 'Weight for L2 loss on embedding matrix.')
-flags.DEFINE_integer('early_stopping', 10, 'Tolerance for early stopping (# of epochs).')
+flags.DEFINE_integer('early_stopping', 50, 'Tolerance for early stopping (# of epochs).')
 flags.DEFINE_integer('max_degree', 2, 'Maximum Chebyshev polynomial degree.')
 
 
@@ -70,39 +72,71 @@ else:
 
 
 # train val split
-supports_train, features_train, y_train, supports_val, features_val, y_val = train_test_split_gcn(supports, features, y, FLAGS.val_ratio)
+supports_train, features_train, y_train, supports_val, features_val, y_val = train_test_split_gcn(supports, features,
+                                                                                                  y, FLAGS.val_ratio,
+                                                                                                  FLAGS.test_ratio)
 list_for_shuffle = list(range(len(supports_train)))
+list_for_shuffle_val = list(range(len(supports_val)))
+
+# print(len(supports_train[0]), len(supports_train[1]))
 
 # Define placeholders
 placeholders = {
     # T_k的数量，相当于Sum的参数beta
-    'support': [tf.sparse_placeholder(tf.float32) for _ in range(num_supports)],
+    # 'support': [tf.sparse_placeholder(tf.float32) for _ in range(num_supports)],
     # 特征：节点数, 特征数
-    'features': tf.sparse_placeholder(tf.float32, shape=tf.constant(features[0][2], dtype=tf.int64)),
+    'features': [tf.sparse_placeholder(tf.float32, shape=tf.constant(features[0][2], dtype=tf.int64))
+                 for _ in range(FLAGS.batchSize)],
     # 节点的label
-    'labels': tf.placeholder(tf.float32, shape=(None, y.shape[1])),
+    'labels': [tf.placeholder(tf.float32, shape=(None, y.shape[1])) for _ in range(FLAGS.batchSize)],
     # 'labels_mask': tf.placeholder(tf.int32),
     'dropout': tf.placeholder_with_default(0., shape=()),
     # helper variable for sparse dropout
-    'num_features_nonzero': tf.placeholder(tf.int32)
+    'num_features_nonzero': [tf.placeholder(tf.int32) for _ in range(FLAGS.batchSize)],
+    'batchSize': tf.placeholder(tf.int64)
 }
+supportBatch = []
+for i in range(FLAGS.batchSize):
+    support = []
+    for j in range(num_supports):
+        support.append(tf.sparse_placeholder(tf.float32))
+    supportBatch.append(support)
+placeholders['support'] = supportBatch
+
+
 
 # Create model: input_dim = features size
-model = model_func(placeholders, input_dim=features[0][2][1], num_nodes=features[0][2][0],
-                   num_graphs=FLAGS.num_graphs, logging=True)
+model = model_func(placeholders, input_dim=features[0][2][1],
+                   num_nodes=features[0][2][0], num_graphs=FLAGS.num_graphs,
+                   logging=True)
 
 sess = tf.Session()
 
 
-def evaluate(features, supports, y, placeholders):
+def evaluate(features, supports, y, placeholders, list_for_shuffle):
+    acc = []
     loss = []
-    accu = []
-    for i in range(len(features)):
-        feed_dict_val = construct_feed_dict(features[i], supports[i], y[i].reshape(-1, 1), placeholders)
+    i = 0
+    while i < len(list_for_shuffle):
+        if len(list_for_shuffle)-i < FLAGS.batchSize:
+            break
+        batch = {'feature': [],
+                 'supports': [],
+                 'y': []}
+        for _ in range(FLAGS.batchSize):
+            batch['feature'].append(features_train[list_for_shuffle[i]])
+            batch['supports'].append(supports_train[list_for_shuffle[i]])
+            batch['y'].append(y_train[list_for_shuffle[i], :].reshape(-1, 1))
+            i += 1
+        feed_dict_val = construct_feed_dict(batch['feature'],
+                                            batch['supports'],
+                                            batch['y'],
+                                            1, placeholders)
         outs = sess.run([model.loss, model.accuracy], feed_dict=feed_dict_val)
+        # print(outs)
         loss.append(outs[0])
-        accu.append(outs[1])
-    return np.mean(loss), np.mean(accu)
+        acc.append(outs[1])
+    return np.mean(loss), np.mean(acc)
 
 
 sess.run(tf.global_variables_initializer())
@@ -117,8 +151,20 @@ for epoch in range(FLAGS.epochs):
     # train
     loss = []
     accu = []
-    for i in list_for_shuffle:
-        feed_dict = construct_feed_dict(features_train[i], supports_train[i], y_train[i, :].reshape(-1, 1), placeholders)
+    i = 0
+    while i <= len(list_for_shuffle):
+        batch = {'feature': [],
+                 'supports': [],
+                 'y': []}
+        if len(list_for_shuffle) - i < FLAGS.batchSize:
+            break
+        for _ in range(FLAGS.batchSize):
+            batch['feature'].append(features_train[list_for_shuffle[i]])
+            batch['supports'].append(supports_train[list_for_shuffle[i]])
+            batch['y'].append(y_train[list_for_shuffle[i], :].reshape(-1, 1))
+            i += 1
+        feed_dict = construct_feed_dict(batch['feature'], batch['supports'], batch['y'],
+                                        FLAGS.batchSize, placeholders)
         feed_dict.update({placeholders['dropout']: FLAGS.dropout})
 
         outs = sess.run([model.opt_op, model.loss, model.accuracy], feed_dict=feed_dict)
@@ -128,7 +174,7 @@ for epoch in range(FLAGS.epochs):
     accu_train = np.mean(accu)
 
     # val
-    loss_val, accu_val = evaluate(features_val, supports_val, y_val, placeholders)
+    loss_val, accu_val = evaluate(features_val, supports_val, y_val, placeholders, list_for_shuffle_val)
     val_record.append(accu_val)
 
     print("Epoch:", '%04d' % (epoch + 1), "train_loss=", "{:.5f}".format(loss_train),
@@ -136,6 +182,7 @@ for epoch in range(FLAGS.epochs):
           "val_acc=", "{:.5f}".format(accu_val), "time=", "{:.5f}".format(time.time() - t))
 
     random.shuffle(list_for_shuffle)                        # 每个epoch结束后，shuffle
+    random.shuffle(list_for_shuffle_val)
 
     if epoch > FLAGS.early_stopping and val_record[-1] > np.mean(val_record[-(FLAGS.early_stopping+1):-1]):
         print('Early stopping...')

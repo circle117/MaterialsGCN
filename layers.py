@@ -65,14 +65,14 @@ class Layer(object):
         self.logging = logging
         self.sparse_inputs = False
 
-    def _call(self, inputs):
+    def _call(self, inputs, index):
         return inputs
 
-    def __call__(self, inputs):
+    def __call__(self, inputs, index):
         with tf.name_scope(self.name):
             if self.logging and not self.sparse_inputs:
                 tf.summary.histogram(self.name + '/inputs', inputs)
-            outputs = self._call(inputs)
+            outputs = self._call(inputs, index)
             if self.logging:
                 tf.summary.histogram(self.name + '/outputs', outputs)
             return outputs
@@ -110,7 +110,7 @@ class Dense1(Layer):
         if self.logging:
             self._log_vars()
 
-    def _call(self, inputs):
+    def _call(self, inputs, index):
         x = inputs
 
         # dropout
@@ -157,7 +157,7 @@ class Dense2(Layer):
         if self.logging:
             self._log_vars()
 
-    def _call(self, inputs):
+    def _call(self, inputs, index):
         x = inputs
 
         # dropout
@@ -187,7 +187,7 @@ class Embedding(Layer):
         if self.logging:
             self._log_vars()
 
-    def _call(self, inputs):
+    def _call(self, inputs, index):
         x = inputs
 
         output = tf.nn.embedding_lookup(self.vars['weights'], x)
@@ -210,10 +210,12 @@ class GraphConvolution(Layer):
         self.placeholders = placeholders
 
         self.act = act
-        self.support = placeholders['support']
+        self.support = placeholders['support'][0]
         self.sparse_inputs = sparse_inputs
         self.featureless = featureless
         self.bias = bias
+        self.input_dim = input_dim
+        self.output_dim = output_dim
 
         # helper variable for sparse dropout
         self.num_features_nonzero = placeholders['num_features_nonzero']
@@ -229,12 +231,14 @@ class GraphConvolution(Layer):
         if self.logging:
             self._log_vars()
 
-    def _call(self, inputs):
+    def _call(self, inputs, index):
         x = inputs
+
+        self.support = self.placeholders['support'][index]
 
         # dropout
         if self.sparse_inputs:
-            x = sparse_dropout(x, 1-self.dropout, self.num_features_nonzero)
+            x = sparse_dropout(x, 1-self.dropout, self.num_features_nonzero[index])
         else:
             x = tf.nn.dropout(x, 1-self.dropout)
 

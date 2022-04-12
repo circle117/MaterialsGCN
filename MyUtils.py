@@ -108,10 +108,11 @@ def load_data(dataset, feature_map, feature_name):
     return adjs, features, y, discrete_features, continuous_features
 
 
-def train_test_split_gcn(supports, features, y, val_ratio):
-    val_num = int(len(supports)*(1-val_ratio))
+def train_test_split_gcn(supports, features, y, val_ratio, test_ratio):
+    val_num = int(len(supports)*(1-val_ratio-test_ratio))
+    test_num = int(len(supports)*(1-test_ratio))
     return supports[:val_num], features[:val_num], y[:val_num, :],\
-           supports[val_num:], features[val_num:], y[val_num:, :]
+           supports[val_num:test_num], features[val_num:test_num], y[val_num:test_num, :]
 
 
 def train_test_split_mlp(discrete_features, continuous_features, val_ratio):
