@@ -76,11 +76,13 @@ class Model(object):
         saver = tf.train.Saver(self.vars)
         self.save_path = saver.save(sess, path)
 
-    def load(self, sess=None):
+    def load(self, sess=None, path=None):
         if not sess:
             raise AttributeError("TensorFlow session not provided.")
+        if not path:
+            raise AttributeError("Save path noe provided.")
         saver = tf.train.Saver(self.vars)
-        save_path = "tmp/%s.ckpt" % self.name
+        save_path = path
         saver.restore(sess, save_path)
         print("Model restored from file: %s" % save_path)
 
