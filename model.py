@@ -34,6 +34,8 @@ class Model(object):
         self.optimizer = None
         self.opt_op = None
 
+        self.save_path = None
+
     def _build(self):
         raise NotImplementedError
 
@@ -68,12 +70,11 @@ class Model(object):
     def _accuracy(self):
         raise NotImplementedError
 
-    def save(self, sess=None):
+    def save(self, sess=None, path=None):
         if not sess:
             raise AttributeError("TensorFlow session not provided.")
         saver = tf.train.Saver(self.vars)
-        save_path = saver.save(sess, "tmp/%s.ckpt" % self.name)
-        print("Model saved in file: %s" % save_path)
+        self.save_path = saver.save(sess, path)
 
     def load(self, sess=None):
         if not sess:
@@ -144,8 +145,9 @@ class GCN(Model):
         # self.input_dim = self.inputs.get_shape().as_list()[1]  # To be supported in future Tensorflow versions
         self.output_dim = placeholders['labels'][0].get_shape().as_list()[1]       # 分类数
         self.placeholders = placeholders
+        self.labels = tf.concat(placeholders['labels'], 0)
 
-        self.optimizer = tf.train.AdamOptimizer(learning_rate=FLAGS.learning_rate)
+        self.optimizer = tf.train.AdamOptimizer(learning_rate=FLAGS.learning_rate, use_locking=True)
 
         self.build()
 
@@ -156,11 +158,11 @@ class GCN(Model):
             self.loss += FLAGS.weight_decay * tf.nn.l2_loss(var)
 
         # Mean absolute error
-        self.loss += self.accuracy
+        self.loss += mean_absolute_error(self.outputs, self.labels)
             # tf.losses.mean_squared_error(self.outputs, self.placeholders['labels'])
 
     def _accuracy(self):
-        self.accuracy = mean_absolute_error(self.outputs, self.placeholders['labels'])
+        self.accuracy = mean_absolute_error(self.outputs, self.labels)
 
     def _build(self):
 
@@ -234,15 +236,17 @@ class GCN(Model):
                     self.activations.append(hidden)
             self.outputs.append(self.predict(self.activations[-1]))
 
+        self.outputs = tf.concat(self.outputs, axis=0)
+
         # Store model variables for easy access
         variables = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope=self.name)
         self.vars = {var.name: var for var in variables}
 
         # Build metrics
-        self._accuracy()
         self._loss()
+        self._accuracy()
 
-        self.opt_op = self.optimizer.minimize(self.loss)
+        self.opt_op = self.optimizer.minimize(self.accuracy)
 
     def predict(self, outputs):
         return tf.nn.softplus(outputs)

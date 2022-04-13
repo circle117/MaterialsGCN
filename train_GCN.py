@@ -7,7 +7,7 @@ import random
 
 tf.disable_v2_behavior()
 
-FEATURE_LIST = ['*', 'C', 'N', 'O', 'F', 'S', 'Si',          # 原子类别
+FEATURE_LIST = ['*', 'C', 'N', 'O', 'F', 'S', 'Si',         # 原子类别
                 'H0', 'H1', 'H2', 'H3',                     # 连接H数量
                 'D1', 'D2', 'D3', 'D4',                     # Degree
                 'A0', 'A1',                                 # 芳香性
@@ -23,6 +23,7 @@ tf.set_random_seed(seed)
 flags = tf.app.flags
 FLAGS = flags.FLAGS
 flags.DEFINE_string('dataset', './dataset/dataMethod2Deleted.csv', 'Dataset string.')
+flags.DEFINE_string('savepath', "./myModel/tmp/gcn1.ckpt", 'Save path string')
 flags.DEFINE_float('val_ratio', 0.1, 'Ratio of validation dataset')
 flags.DEFINE_float('test_ratio', 0.1, 'Ratio of test dataset')
 flags.DEFINE_string('model', 'gcn_cheby', 'Model string.')      # 'gcn', 'gcn_cheby', 'dense'
@@ -33,13 +34,13 @@ flags.DEFINE_boolean('dense', False, 'dense or pooling')            # pooling每
 flags.DEFINE_integer('hidden', 64, 'Number of units in hidden layer 1.')
 flags.DEFINE_integer('num_graphs', 5, 'Number of units in hidden layer 3.')
 flags.DEFINE_float('dropout', 0.3, 'Dropout rate (1 - keep probability).')
-flags.DEFINE_float('weight_decay', 5e-1, 'Weight for L2 loss on embedding matrix.')
+flags.DEFINE_float('weight_decay', 5e-2, 'Weight for L2 loss on embedding matrix.')
 flags.DEFINE_integer('early_stopping', 50, 'Tolerance for early stopping (# of epochs).')
 flags.DEFINE_integer('max_degree', 2, 'Maximum Chebyshev polynomial degree.')
 
 
 # load_data
-feature_map = {}
+feature_map = {}                                # for embedding
 for idx, feature in enumerate(FEATURE_LIST):
     feature_map[feature] = idx
 adjs, features, y = load_data_gcn(FLAGS.dataset, feature_map)
@@ -72,11 +73,10 @@ else:
 
 
 # train val split
-supports_train, features_train, y_train, supports_val, features_val, y_val = train_test_split_gcn(supports, features,
+supports_train, features_train, y_train, supports_val, features_val, y_val = train_val_split_gcn(supports, features,
                                                                                                   y, FLAGS.val_ratio,
                                                                                                   FLAGS.test_ratio)
 list_for_shuffle = list(range(len(supports_train)))
-list_for_shuffle_val = list(range(len(supports_val)))
 
 # print(len(supports_train[0]), len(supports_train[1]))
 
@@ -95,6 +95,7 @@ placeholders = {
     'num_features_nonzero': [tf.placeholder(tf.int32) for _ in range(FLAGS.batchSize)],
     'batchSize': tf.placeholder(tf.int64)
 }
+# support for batch train
 supportBatch = []
 for i in range(FLAGS.batchSize):
     support = []
@@ -102,7 +103,6 @@ for i in range(FLAGS.batchSize):
         support.append(tf.sparse_placeholder(tf.float32))
     supportBatch.append(support)
 placeholders['support'] = supportBatch
-
 
 
 # Create model: input_dim = features size
@@ -113,25 +113,41 @@ model = model_func(placeholders, input_dim=features[0][2][1],
 sess = tf.Session()
 
 
-def evaluate(features, supports, y, placeholders, list_for_shuffle):
+def evaluate(features, supports, y, placeholders):
     acc = []
     loss = []
     i = 0
-    while i < len(list_for_shuffle):
-        if len(list_for_shuffle)-i < FLAGS.batchSize:
-            break
+    length = len(features)
+    while i < length:
         batch = {'feature': [],
                  'supports': [],
                  'y': []}
-        for _ in range(FLAGS.batchSize):
-            batch['feature'].append(features_train[list_for_shuffle[i]])
-            batch['supports'].append(supports_train[list_for_shuffle[i]])
-            batch['y'].append(y_train[list_for_shuffle[i], :].reshape(-1, 1))
-            i += 1
-        feed_dict_val = construct_feed_dict(batch['feature'],
-                                            batch['supports'],
-                                            batch['y'],
-                                            1, placeholders)
+        if length-i < FLAGS.batchSize:
+            while i < length:
+                batch['feature'].append(features[i])
+                batch['supports'].append(supports[i])
+                batch['y'].append(y[i, :].reshape(-1, 1))
+                i += 1
+                # 不足用任意补全，batchsize设置为有效数据大小
+            while len(batch['feature']) < FLAGS.batchSize:
+                batch['feature'].append(features[-1])
+                batch['supports'].append(supports[-1])
+                batch['y'].append(y[-1, :].reshape(-1, 1))
+            feed_dict_val = construct_feed_dict(batch['feature'],
+                                                batch['supports'],
+                                                batch['y'],
+                                                length % FLAGS.batchSize, placeholders)
+
+        else:
+            for _ in range(FLAGS.batchSize):
+                batch['feature'].append(features[i])
+                batch['supports'].append(supports[i])
+                batch['y'].append(y[i, :].reshape(-1, 1))
+                i += 1
+            feed_dict_val = construct_feed_dict(batch['feature'],
+                                                batch['supports'],
+                                                batch['y'],
+                                                FLAGS.batchSize, placeholders)
         outs = sess.run([model.loss, model.accuracy], feed_dict=feed_dict_val)
         # print(outs)
         loss.append(outs[0])
@@ -144,6 +160,7 @@ sess.run(tf.global_variables_initializer())
 saver = tf.train.Saver()
 
 val_record = []
+start = time.time()
 for epoch in range(FLAGS.epochs):
 
     t = time.time()
@@ -174,7 +191,7 @@ for epoch in range(FLAGS.epochs):
     accu_train = np.mean(accu)
 
     # val
-    loss_val, accu_val = evaluate(features_val, supports_val, y_val, placeholders, list_for_shuffle_val)
+    loss_val, accu_val = evaluate(features_val, supports_val, y_val, placeholders)
     val_record.append(accu_val)
 
     print("Epoch:", '%04d' % (epoch + 1), "train_loss=", "{:.5f}".format(loss_train),
@@ -182,12 +199,12 @@ for epoch in range(FLAGS.epochs):
           "val_acc=", "{:.5f}".format(accu_val), "time=", "{:.5f}".format(time.time() - t))
 
     random.shuffle(list_for_shuffle)                        # 每个epoch结束后，shuffle
-    random.shuffle(list_for_shuffle_val)
 
     if epoch > FLAGS.early_stopping and val_record[-1] > np.mean(val_record[-(FLAGS.early_stopping+1):-1]):
         print('Early stopping...')
         break
     else:
-        save_path = saver.save(sess, "./my_model/temp.ckpt")
+        model.save(sess, FLAGS.savepath)
 
-print("Save to path:", save_path)
+print(model.save_path)
+print("Time = %.5f" % (time.time() - start))
