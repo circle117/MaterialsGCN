@@ -16,7 +16,7 @@ FEATURE_LIST = ['*', 'C', 'N', 'O', 'F', 'S', 'Si',         # 原子类别
 flags = tf.app.flags
 FLAGS = flags.FLAGS
 flags.DEFINE_string('dataset', './dataset/dataMethod2Deleted.csv', 'Dataset string.')
-flags.DEFINE_string('savepath', './myModel/tmp/gcn1.ckpt', 'save path string')
+flags.DEFINE_string('savepath', './myModel/GCN_10/gcn.ckpt', 'save path string')
 flags.DEFINE_float('val_ratio', 0.1, 'Ratio of validation dataset')
 flags.DEFINE_float('test_ratio', 0.1, 'Ratio of test dataset')
 flags.DEFINE_string('model', 'gcn_cheby', 'Model string.')              # 'gcn', 'gcn_cheby', 'dense'

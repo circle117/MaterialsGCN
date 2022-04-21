@@ -1,3 +1,5 @@
+import os
+
 import tensorflow._api.v2.compat.v1 as tf
 from MyUtils import *
 from utils import *
@@ -23,11 +25,11 @@ tf.set_random_seed(seed)
 flags = tf.app.flags
 FLAGS = flags.FLAGS
 flags.DEFINE_string('dataset', './dataset/dataMethod2Deleted.csv', 'Dataset string.')
-flags.DEFINE_string('savepath', "./myModel/tmp/gcn1.ckpt", 'Save path string')
+flags.DEFINE_string('savepath', "./myModel/GCN_10", 'Save path string')
 flags.DEFINE_float('val_ratio', 0.1, 'Ratio of validation dataset')
 flags.DEFINE_float('test_ratio', 0.1, 'Ratio of test dataset')
 flags.DEFINE_string('model', 'gcn_cheby', 'Model string.')      # 'gcn', 'gcn_cheby', 'dense'
-flags.DEFINE_float('learning_rate', 0.1, 'Initial learning rate.')
+flags.DEFINE_float('learning_rate', 0.01, 'Initial learning rate.')
 flags.DEFINE_integer('epochs', 200, 'Number of epochs to train.')
 flags.DEFINE_integer('batchSize', 16, 'Number of batches to train')
 flags.DEFINE_boolean('dense', False, 'dense or pooling')            # pooling每个hidden相等
@@ -35,7 +37,7 @@ flags.DEFINE_integer('hidden', 64, 'Number of units in hidden layer 1.')
 flags.DEFINE_integer('num_graphs', 5, 'Number of units in hidden layer 3.')
 flags.DEFINE_float('dropout', 0.3, 'Dropout rate (1 - keep probability).')
 flags.DEFINE_float('weight_decay', 5e-2, 'Weight for L2 loss on embedding matrix.')
-flags.DEFINE_integer('early_stopping', 50, 'Tolerance for early stopping (# of epochs).')
+flags.DEFINE_integer('early_stopping', 20, 'Tolerance for early stopping (# of epochs).')
 flags.DEFINE_integer('max_degree', 2, 'Maximum Chebyshev polynomial degree.')
 
 
@@ -204,7 +206,11 @@ for epoch in range(FLAGS.epochs):
         print('Early stopping...')
         break
     else:
-        model.save(sess, FLAGS.savepath)
+        if os.path.exists(FLAGS.savepath):
+            for file in os.listdir(FLAGS.savepath):
+                file_path = os.path.join(FLAGS.savepath, file)
+                os.remove(file_path)
+        model.save(sess, FLAGS.savepath+'/gcn.ckpt')
 
 print(model.save_path)
 print("Time = %.5f" % (time.time() - start))
