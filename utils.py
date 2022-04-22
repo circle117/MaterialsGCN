@@ -24,6 +24,7 @@ def sample_mask(idx, l):
 def sparse_to_tuple(sparse_mx):
     """Convert sparse matrix to tuple representation."""
     def to_tuple(mx):
+        """坐标，值，大小"""
         if not sp.isspmatrix_coo(mx):
             mx = mx.tocoo()
         coords = np.vstack((mx.row, mx.col)).transpose()
