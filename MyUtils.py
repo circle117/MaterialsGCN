@@ -46,9 +46,6 @@ def load_data_gcn(dataset, feature_map):
         else:
             width = int(width/2)
             adjs[i] = sp.csr_matrix(np.pad(adjs[i].todense(), ((width, width+1), (width, width+1)), 'constant'))
-    """
-    batch-wise没做
-    """
 
     # features
     features = []
@@ -99,13 +96,19 @@ def load_data(dataset, feature_map, feature_name):
     discrete_features = {}
     continuous_features = []
 
-    for name in feature_name[0]:
+    for name in feature_name['discrete']:
         discrete_features[name] = encode_one_hot(df, name)
-    for name in feature_name[1]:
+    for name in feature_name['continuous']:
         continuous_features.append(np.array(list(df[name].values)))
     continuous_features = np.stack(continuous_features, axis=1)
 
     return adjs, features, y, discrete_features, continuous_features
+
+
+def preprocess_cfeatures(continuous_features):
+    coldiff = continuous_features.max(0) - continuous_features.min(0)
+    continuous_features = (continuous_features - continuous_features.min(0))/coldiff
+    return continuous_features
 
 
 def train_val_split_gcn(supports, features, y, val_ratio, test_ratio):
@@ -131,13 +134,21 @@ def train_test_split_mlp(discrete_features, continuous_features, val_ratio):
         continuous_features[:num], continuous_features[num:]
 
 
-def my_construct_feed_dict(gcn_feature, support, y, con_feature, dis_feature, index, placeholders):
+def my_construct_feed_dict(gcn_feature, support, y, con_feature, batch, D_feature_name, placeholders):
     feed_dict = {}
-    feed_dict.update({placeholders['support'][i]: support[i] for i in range(len(support))})
-    feed_dict.update({placeholders['features']: gcn_feature})
-    feed_dict.update({placeholders['labels']: y})
-    feed_dict.update({placeholders['con_features']: con_feature})
-    feed_dict.update({placeholders['num_features_nonzero']: gcn_feature[1].shape})
-    for key, value in dis_feature.items():
-        feed_dict.update({placeholders[key]: value[index].reshape((1, -1))})
+    # feed_dict.update({placeholders['support'][i]: support[i] for i in range(len(support))})
+    feed_dict.update({placeholders['features'][i]: gcn_feature[i] for i in range(len(gcn_feature))})
+    feed_dict.update({placeholders['labels'][i]: y[i] for i in range(len(y))})
+    feed_dict.update({placeholders['con_features'][i]: con_feature[i] for i in range(len(con_feature))})
+    feed_dict.update({placeholders['num_features_nonzero'][i]: gcn_feature[i][1].shape
+                      for i in range(len(gcn_feature))})
+
+    for name in D_feature_name:
+        feed_dict.update({placeholders[name][i]: batch[name][i] for i in range(len(batch[name]))})
+
+    support_dict = {}
+    for i in range(len(support)):
+        for j in range(len(support[i])):
+            support_dict[placeholders['support'][i][j]] = support[i][j]
+    feed_dict.update(support_dict)
     return feed_dict

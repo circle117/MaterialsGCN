@@ -130,8 +130,8 @@ class MLP(Model):
                                  dropout=True,
                                  logging=self.logging))
 
-    def predict(self):
-        return tf.nn.softmax(self.outputs)
+    def predict(self, output):
+        return tf.nn.softmax(output)
 
 
 class GCN(Model):
@@ -262,19 +262,19 @@ class MMGCN(Model):
         self.gcn_inputs = placeholders['features']                              # GCN特征
         self.mlp_inputs_c = placeholders['con_features']                        # 连续特征
         self.mlp_inputs_d = {}                                                  # 离散特征
-        self.mlp_inputs = []                                                    # mlp特征
-        self.fusion_inputs = None                                               # fusion特征
         self.d_feature_dim = d_feature_dim                                      # 离散特征名称及dim
         for name, dim in self.d_feature_dim:
             self.mlp_inputs_d[name] = placeholders[name]
+        self.mlp_inputs = []                                                    # mlp特征
+        self.fusion_inputs = None                                               # fusion特征
 
         # 层大小
         self.input_dim = input_dim                                              # gcn特征数
         self.num_nodes = num_nodes                                              # gcn节点数
         self.num_graphs = num_graphs                                            # GCN层数
-        self.output_dim = placeholders['labels'].get_shape().as_list()[1]       # 输出大小
-        self.mlp_input_dim = placeholders['con_features'].get_shape().as_list()[1] + \
-                             FLAGS.embed_output1 + FLAGS.embed_output2 + FLAGS.embed_output3
+        self.output_dim = placeholders['labels'][0].get_shape().as_list()[1]    # 模型输出大小
+        self.mlp_input_dim = placeholders['con_features'][0].get_shape().as_list()[1] + \
+                             FLAGS.embed_solvent + FLAGS.embed_method2
 
         # 层list
         self.gcn_layers = []                                                    # GCN层
@@ -287,6 +287,7 @@ class MMGCN(Model):
         self.mlp_outputs = []                                                   # MLP每层输出
         self.mlp_output = None                                                  # MLP最终输出
         self.fusion_outputs = []                                                # Fusion输出
+        self.outputs = []
         self.placeholders = placeholders
 
         self.optimizer = tf.train.AdamOptimizer(learning_rate=FLAGS.learning_rate)
@@ -306,10 +307,8 @@ class MMGCN(Model):
 
     def _build(self):
         """
-        build layers
-        :return:
+        GCN
         """
-        """GCN"""
         self.gcn_layers.append(GraphConvolution(input_dim=self.input_dim,
                                                 output_dim=FLAGS.gcn_hidden,
                                                 placeholders=self.placeholders,
@@ -318,40 +317,26 @@ class MMGCN(Model):
                                                 sparse_inputs=True,
                                                 logging=self.logging))
 
-        self.gcn_layers.append(GraphConvolution(input_dim=FLAGS.gcn_hidden,
-                                                output_dim=FLAGS.gcn_hidden,
-                                                placeholders=self.placeholders,
-                                                act=tf.nn.relu,
-                                                dropout=False,
-                                                logging=self.logging))
-
-        self.gcn_layers.append(GraphConvolution(input_dim=FLAGS.gcn_hidden,
-                                                output_dim=FLAGS.gcn_hidden,
-                                                placeholders=self.placeholders,
-                                                act=tf.nn.relu,
-                                                dropout=False,
-                                                logging=self.logging))
+        for i in range(FLAGS.num_graphs-1):
+            self.gcn_layers.append(GraphConvolution(input_dim=FLAGS.gcn_hidden,
+                                                    output_dim=FLAGS.gcn_hidden,
+                                                    placeholders=self.placeholders,
+                                                    dropout=False,
+                                                    logging=self.logging))
 
         self.gcn_layers.append(Dense1(input_dim=FLAGS.gcn_hidden,
                                       output_dim=self.output_dim,
                                       placeholders=self.placeholders,
                                       act=tf.nn.relu,
-                                      dropout=True,
-                                      bias=True,
-                                      logging=self.logging))
-
-        self.gcn_layers.append(Dense1(input_dim=self.num_nodes,
-                                      output_dim=FLAGS.gcn_dense_hidden,
-                                      placeholders=self.placeholders,
-                                      act=tf.nn.relu,
                                       dropout=False,
-                                      bias=True,
                                       logging=self.logging))
 
-        """Embedding"""
+        """
+        Embedding
+        """
         self.embedding_layers[self.d_feature_dim[0][0]] = Dense1(
             input_dim=self.d_feature_dim[0][1],
-            output_dim=FLAGS.embed_output1,
+            output_dim=FLAGS.embed_solvent,
             placeholders=self.placeholders,
             act=lambda x: x,
             dropout=False,
@@ -361,7 +346,7 @@ class MMGCN(Model):
 
         self.embedding_layers[self.d_feature_dim[1][0]] = Dense1(
             input_dim=self.d_feature_dim[1][1],
-            output_dim=FLAGS.embed_output2,
+            output_dim=FLAGS.embed_method2,
             placeholders=self.placeholders,
             act=lambda x: x,
             dropout=False,
@@ -369,17 +354,9 @@ class MMGCN(Model):
             logging=self.logging
         )
 
-        self.embedding_layers[self.d_feature_dim[2][0]] = Dense1(
-            input_dim=self.d_feature_dim[2][1],
-            output_dim=FLAGS.embed_output3,
-            placeholders=self.placeholders,
-            act=lambda x:x,
-            dropout=False,
-            bias=False,
-            logging=self.logging
-        )
-
-        """MLP"""
+        """
+        MLP
+        """
         self.mlp_layers.append(Dense1(input_dim=self.mlp_input_dim,
                                       output_dim=FLAGS.mlp_hidden1,
                                       placeholders=self.placeholders,
@@ -414,7 +391,7 @@ class MMGCN(Model):
                                       output_dim=FLAGS.fusion_hidden1,
                                       placeholders=self.placeholders,
                                       act=tf.nn.relu,
-                                      dropout=False,
+                                      dropout=True,
                                       bias=True,
                                       logging=self.logging))
 
@@ -422,7 +399,7 @@ class MMGCN(Model):
                                          output_dim=FLAGS.fusion_hidden2,
                                          placeholders=self.placeholders,
                                          act=tf.nn.relu,
-                                         dropout=False,
+                                         dropout=True,
                                          bias=True,
                                          logging=self.logging))
 
@@ -430,7 +407,7 @@ class MMGCN(Model):
                                          output_dim=self.output_dim,
                                          placeholders=self.placeholders,
                                          act=tf.nn.relu,
-                                         dropout=False,
+                                         dropout=True,
                                          bias=True,
                                          logging=self.logging))
 
@@ -438,49 +415,51 @@ class MMGCN(Model):
         with tf.variable_scope(self.name):
             self._build()
 
-
-        # Build sequential layer model
-        """GCN"""
-        self.gcn_outputs.append(self.gcn_inputs)
-        for layer in self.gcn_layers[:-1]:
-            hidden = layer(self.gcn_outputs[-1])
-            self.gcn_outputs.append(hidden)
-            if len(self.gcn_outputs)-1 == self.num_graphs:
-                gcn_output = tf.stack(self.gcn_outputs[1:], axis=1)             # 除掉输入
-                gcn_output = tf.reshape(gcn_output, [1, self.num_graphs, self.num_nodes, FLAGS.gcn_hidden])
-                hidden = tf.nn.max_pool(gcn_output,
-                                        ksize=[1, self.num_graphs, 1, 1],
-                                        strides=[1, 1, 1, 1],
-                                        padding='VALID')
-                hidden = tf.reshape(hidden, [self.num_nodes, FLAGS.gcn_hidden])
+        for i in range(FLAGS.batchSize):
+            # Build sequential layer model
+            """GCN"""
+            self.gcn_outputs = [self.gcn_inputs[i]]
+            for layer in self.gcn_layers:
+                hidden = layer(self.gcn_outputs[-1], i)
                 self.gcn_outputs.append(hidden)
-        self.gcn_output = self.gcn_outputs[-1]
-        self.gcn_output = tf.reshape(self.gcn_output, [1, self.num_nodes])
-        if FLAGS.gcn_dense:
-            self.gcn_output = self.gcn_layers[-1](self.gcn_output)
+                if len(self.gcn_outputs)-1 == self.num_graphs:
+                    gcn_output = tf.stack(self.gcn_outputs[1:], axis=1)             # 除掉输入
+                    gcn_output = tf.reshape(gcn_output, [1, self.num_graphs, self.num_nodes, FLAGS.gcn_hidden])
+                    hidden = tf.nn.max_pool(gcn_output,
+                                            ksize=[1, self.num_graphs, 1, 1],
+                                            strides=[1, 1, 1, 1],
+                                            padding='VALID')
+                    hidden = tf.reshape(hidden, [self.num_nodes, FLAGS.gcn_hidden])
+                    self.gcn_outputs.append(hidden)
+            self.gcn_output = self.gcn_outputs[-1]
+            self.gcn_output = tf.reshape(self.gcn_output, [1, self.num_nodes])
+            if FLAGS.gcn_dense:
+                self.gcn_output = self.gcn_layers[-1](self.gcn_output)
 
-        """Embedding"""
-        for name, dim in self.d_feature_dim:
-            self.mlp_inputs.append(self.embedding_layers[name](self.mlp_inputs_d[name]))
-        self.mlp_inputs.append(self.mlp_inputs_c)
-        self.mlp_inputs = tf.concat(self.mlp_inputs, axis=1)
+            """Embedding"""
+            self.mlp_inputs = []
+            for name, dim in self.d_feature_dim:
+                self.mlp_inputs.append(self.embedding_layers[name](self.mlp_inputs_d[name][i], i))
+            self.mlp_inputs.append(self.mlp_inputs_c[i])
+            self.mlp_inputs = tf.concat(self.mlp_inputs, axis=1)
 
-        """MLP"""
-        self.mlp_outputs.append(self.mlp_inputs)
-        for layer in self.mlp_layers:
-            hidden = layer(self.mlp_outputs[-1])
-            self.mlp_outputs.append(hidden)
-        self.mlp_output = self.mlp_outputs[-1]
+            """MLP"""
+            self.mlp_outputs = [self.mlp_inputs]
+            for layer in self.mlp_layers:
+                hidden = layer(self.mlp_outputs[-1], i)
+                self.mlp_outputs.append(hidden)
+            self.mlp_output = self.mlp_outputs[-1]
 
-        self.fusion_inputs = tf.concat([self.gcn_output, self.mlp_output], axis=1)
+            self.fusion_inputs = tf.concat([self.gcn_output, self.mlp_output], axis=1)
 
-        """Fusion"""
-        self.fusion_outputs.append(self.fusion_inputs)
-        for layer in self.fusion_layers:
-            hidden = layer(self.fusion_outputs[-1])
-            self.fusion_outputs.append(hidden)
-        self.outputs = self.fusion_outputs[-1]
+            """Fusion"""
+            self.fusion_outputs = [self.fusion_inputs]
+            for layer in self.fusion_layers:
+                hidden = layer(self.fusion_outputs[-1], i)
+                self.fusion_outputs.append(hidden)
+            self.outputs.append(self.predict(self.fusion_outputs[-1]))
 
+        self.outputs = tf.concat(self.outputs, axis=0)
 
         # Store model variables for easy access
         variables = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope=self.name)
