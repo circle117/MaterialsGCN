@@ -8,6 +8,7 @@ import random
 import os
 
 tf.disable_v2_behavior()
+tf.disable_eager_execution()
 
 FEATURE_GCN_LIST = ['*', 'C', 'N', 'O', 'F', 'S', 'Si',         # 原子类别
                     'H0', 'H1', 'H2', 'H3',                     # 连接H数量
@@ -40,24 +41,28 @@ flags.DEFINE_float('learning_rate', 0.01, 'Initial learning rate.')
 flags.DEFINE_integer('epochs', 500, 'Number of epochs to train.')
 flags.DEFINE_float('dropout', 0.3, 'Dropout rate (1 - keep probability).')
 flags.DEFINE_float('weight_decay', 5e-2, 'Weight for L2 loss on embedding matrix.')
-flags.DEFINE_integer('early_stopping', 30, 'Tolerance for early stopping (# of epochs).')
+flags.DEFINE_integer('early_stopping', 50, 'Tolerance for early stopping (# of epochs).')
 flags.DEFINE_integer('batchSize', 16, 'Number of batch size')
 # GCN
 flags.DEFINE_integer('gcn_hidden', 64, 'Number of units in GCN hidden layer .')
 flags.DEFINE_integer('num_graphs', 5, 'Number of units in hidden layer 3.')
 flags.DEFINE_integer('max_degree', 2, 'Maximum Chebyshev polynomial degree.')
-flags.DEFINE_boolean('gcn_dense', False, 'If do gcn dense')
-flags.DEFINE_integer('gcn_dense_hidden', 32, 'Number of units in GCN dense Layer')
+flags.DEFINE_integer('gcn_dense', 16, 'If do gcn dense')
+# TabNet
+flags.DEFINE_integer('feature_dim', 32, 'hidden representation in feature transformation block')
+flags.DEFINE_integer('output_dim', 8, 'output dimension of every decision step')
+flags.DEFINE_integer('num_decision_steps', 8, 'Number of decision step')
+flags.DEFINE_integer('relaxation_factor', 2, 'Number of feature usage')
 # Embedding
-flags.DEFINE_integer('embed_solvent', 2, 'Number of units in Embedding1 layer')         # Solvent
-flags.DEFINE_integer('embed_method2', 2, 'Number of units in Embedding3 layer')         # Method2
+flags.DEFINE_integer('embed_solvent', 1, 'Number of units in Embedding1 layer')         # Solvent
+flags.DEFINE_integer('embed_method2', 1, 'Number of units in Embedding3 layer')         # Method2
 # MLP
 flags.DEFINE_integer('mlp_hidden1', 32, 'Number of units in MLP hidden layer1')
 flags.DEFINE_integer('mlp_hidden2', 64, 'Number of units in MLP hidden layer2')
 flags.DEFINE_integer('mlp_hidden3', 32, 'Number of units in MLP hidden layer3')
 # Fusion
-flags.DEFINE_integer('fusion_hidden1', 64, 'Number of units in Fusion hidden layer1')
-flags.DEFINE_integer('fusion_hidden2', 32, 'Number of units in Fusion hidden layer2')
+flags.DEFINE_integer('fusion_hidden1', 32, 'Number of units in Fusion hidden layer1')
+flags.DEFINE_integer('fusion_hidden2', 16, 'Number of units in Fusion hidden layer2')
 
 
 """
@@ -161,32 +166,40 @@ for name in FEATURE_NAME['discrete']:
 """
 Create model: input_dim = features size
 """
-model = model_func(placeholders, input_dim=gcn_features[0][2][1], num_nodes=gcn_features[0][2][0],
-                   num_graphs=FLAGS.num_graphs, d_feature_dim=d_feature_dim, logging=True)
+model = model_func(placeholders,
+                   input_dim=gcn_features[0][2][1],
+                   num_nodes=gcn_features[0][2][0],
+                   num_graphs=FLAGS.num_graphs,
+                   d_feature_dim=d_feature_dim,
+                   num_features=len(FEATURE_NAME['continuous'])+len(FEATURE_NAME['discrete']),
+                   feature_dim=FLAGS.feature_dim,
+                   output_dim=FLAGS.output_dim,
+                   num_decision_steps=FLAGS.num_decision_steps,
+                   relaxation_factor=FLAGS.relaxation_factor,
+                   batch_momentum=0.99,
+                   virtual_batch_size=FLAGS.batchSize,
+                   epsilon=0.00001,
+                   logging=True)
 
 
 def evaluate(features, supports, y, con_features, dis_features, placeholders):
     loss = []
     accu = []
-    i = 0
-    length = len(features)
-    while i < length:
+    model.batch_size = 1
+    for i in range(len(features)):
         batch = {'feature': [],
                  'support': [],
                  'y': [],
                  'continuous_features': []}
         for name in FEATURE_NAME['discrete']:
             batch[name] = []
-        while len(batch['feature'])<FLAGS.batchSize and length-i>=FLAGS.batchSize-len(batch['feature']):
+        for _ in range(FLAGS.batchSize):
             batch['feature'].append(features[i])
             batch['support'].append(supports[i])
             batch['y'].append(y[i, :].reshape(-1, 1))
             batch['continuous_features'].append(con_features[i].reshape(1, -1))
             for name in FEATURE_NAME['discrete']:
                 batch[name].append(dis_features[name][i].reshape(1, -1))
-            i += 1
-        if len(batch['feature'])<FLAGS.batchSize:
-            break
         feed_dict_val = my_construct_feed_dict(batch['feature'], batch['support'], batch['y'],
                                                batch['continuous_features'], batch,
                                                FEATURE_NAME['discrete'], placeholders)
@@ -212,6 +225,7 @@ for epoch in range(FLAGS.epochs):
     loss = []
     accu = []
     i = 0
+    model.batch_size = FLAGS.batchSize
     while i < len(list_for_shuffle):
         batch = {'feature': [],
                  'support': [],

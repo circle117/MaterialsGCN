@@ -2,9 +2,15 @@ import platform
 
 from layers import *
 from metrics import *
+import tensorflow_addons as tfa
 
 flags = tf.app.flags
 FLAGS = flags.FLAGS
+
+
+def glu(act, n_units):
+    """Generalized linear unit nonlinear activation."""
+    return act[:, :n_units] * tf.nn.sigmoid(act[:, n_units:])
 
 
 class Model(object):
@@ -149,6 +155,8 @@ class GCN(Model):
         self.placeholders = placeholders
         self.labels = tf.concat(placeholders['labels'], 0)
 
+        self.features = None
+
         self.optimizer = tf.train.AdamOptimizer(learning_rate=FLAGS.learning_rate, use_locking=True)
 
         self.build()
@@ -235,6 +243,7 @@ class GCN(Model):
                                             strides=[1, 1, 1, 1],
                                             padding='VALID')
                     hidden = tf.reshape(hidden, [self.num_nodes, FLAGS.hidden])
+                    self.features = hidden
                     self.activations.append(hidden)
             self.outputs.append(self.predict(self.activations[-1]))
 
@@ -255,16 +264,33 @@ class GCN(Model):
 
 
 class MMGCN(Model):
-    def __init__(self, placeholders, input_dim, num_nodes, num_graphs, d_feature_dim, **kwargs):
+    def __init__(self,
+                 placeholders,
+                 input_dim,
+                 num_nodes,
+                 num_graphs,
+                 d_feature_dim,
+                 num_features,
+                 feature_dim,
+                 output_dim,
+                 num_decision_steps,
+                 relaxation_factor,
+                 batch_momentum,
+                 virtual_batch_size,
+                 epsilon,
+                 **kwargs):
         super(MMGCN, self).__init__(**kwargs)
+
+        self.batch_size = len(placeholders['features'])
+        self.is_training = True
 
         # 特征
         self.gcn_inputs = placeholders['features']                              # GCN特征
-        self.mlp_inputs_c = placeholders['con_features']                        # 连续特征
+        self.mlp_inputs_c = tf.concat(placeholders['con_features'], 0)          # 连续特征
         self.mlp_inputs_d = {}                                                  # 离散特征
         self.d_feature_dim = d_feature_dim                                      # 离散特征名称及dim
         for name, dim in self.d_feature_dim:
-            self.mlp_inputs_d[name] = placeholders[name]
+            self.mlp_inputs_d[name] = tf.concat(placeholders[name], 0)
         self.mlp_inputs = []                                                    # mlp特征
         self.fusion_inputs = None                                               # fusion特征
 
@@ -289,6 +315,17 @@ class MMGCN(Model):
         self.fusion_outputs = []                                                # Fusion输出
         self.outputs = []
         self.placeholders = placeholders
+
+        # Tabnet parameters
+        self.num_features = num_features
+        self.feature_dim = feature_dim
+        self.output_dim_tabnet = output_dim
+        self.num_decision_steps = num_decision_steps
+        self.relaxation_factor = relaxation_factor
+        self.batch_momentum = batch_momentum
+        self.virtual_batch_size = virtual_batch_size
+        self.epsilon = epsilon
+        self.reuse = False
 
         self.optimizer = tf.train.AdamOptimizer(learning_rate=FLAGS.learning_rate)
 
@@ -331,6 +368,13 @@ class MMGCN(Model):
                                       dropout=False,
                                       logging=self.logging))
 
+        self.gcn_layers.append(Dense1(input_dim=self.num_nodes,
+                                      output_dim=FLAGS.gcn_dense,
+                                      placeholders=self.placeholders,
+                                      act=tf.nn.relu,
+                                      dropout=True,
+                                      logging=self.logging))
+
         """
         Embedding
         """
@@ -361,7 +405,7 @@ class MMGCN(Model):
                                       output_dim=FLAGS.mlp_hidden1,
                                       placeholders=self.placeholders,
                                       act=tf.nn.relu,
-                                      dropout=False,
+                                      dropout=True,
                                       bias=True,
                                       logging=self.logging))
 
@@ -369,7 +413,7 @@ class MMGCN(Model):
                                       output_dim=FLAGS.mlp_hidden2,
                                       placeholders=self.placeholders,
                                       act=tf.nn.relu,
-                                      dropout=False,
+                                      dropout=True,
                                       bias=True,
                                       logging=self.logging))
 
@@ -377,23 +421,23 @@ class MMGCN(Model):
                                       output_dim=FLAGS.mlp_hidden3,
                                       placeholders=self.placeholders,
                                       act=tf.nn.relu,
-                                      dropout=False,
+                                      dropout=True,
                                       bias=True,
                                       logging=self.logging))
 
 
         """Fusion"""
         if FLAGS.gcn_dense:
-            fusion_input_dim = FLAGS.mlp_hidden3+FLAGS.gcn_dense_hidden
+            fusion_input_dim = FLAGS.output_dim+FLAGS.gcn_dense
         else:
-            fusion_input_dim = FLAGS.mlp_hidden3+self.num_nodes
+            fusion_input_dim = FLAGS.output_dim+self.num_nodes
         self.fusion_layers.append(Dense1(input_dim=fusion_input_dim,
-                                      output_dim=FLAGS.fusion_hidden1,
-                                      placeholders=self.placeholders,
-                                      act=tf.nn.relu,
-                                      dropout=True,
-                                      bias=True,
-                                      logging=self.logging))
+                                         output_dim=FLAGS.fusion_hidden1,
+                                         placeholders=self.placeholders,
+                                         act=tf.nn.relu,
+                                         dropout=True,
+                                         bias=True,
+                                         logging=self.logging))
 
         self.fusion_layers.append(Dense1(input_dim=FLAGS.fusion_hidden1,
                                          output_dim=FLAGS.fusion_hidden2,
@@ -411,15 +455,161 @@ class MMGCN(Model):
                                          bias=True,
                                          logging=self.logging))
 
+    def _build_tabnet(self, data, is_training):
+        with tf.variable_scope(self.name, reuse=self.reuse):
+            masked_features = data
+            batch_size = tf.shape(masked_features)[0]
+
+            # Initializes decision-step dependent variables.
+            output_aggregated = tf.zeros([batch_size, self.output_dim_tabnet])
+            mask_values = tf.zeros([batch_size, self.num_features])
+            aggregated_mask_values = tf.zeros([batch_size, self.num_features])
+            complemantary_aggregated_mask_values = tf.ones(
+                [batch_size, self.num_features])
+            total_entropy = 0
+
+            if is_training:
+                v_b = self.virtual_batch_size
+            else:
+                v_b = 1
+
+            for ni in range(self.num_decision_steps):
+
+                # Feature transformer with two shared and two decision step dependent
+                # blocks is used below.
+
+                reuse_flag = (ni > 0)
+
+                transform_f1 = tf.layers.dense(
+                    masked_features,
+                    self.feature_dim * 2,
+                    name="Transform_f1",
+                    reuse=reuse_flag,
+                    use_bias=False)
+                transform_f1 = tf.layers.batch_normalization(
+                    transform_f1,
+                    training=is_training,
+                    momentum=self.batch_momentum,
+                    virtual_batch_size=v_b)
+                transform_f1 = glu(transform_f1, self.feature_dim)
+
+                transform_f2 = tf.layers.dense(
+                    transform_f1,
+                    self.feature_dim * 2,
+                    name="Transform_f2",
+                    reuse=reuse_flag,
+                    use_bias=False)
+                transform_f2 = tf.layers.batch_normalization(
+                    transform_f2,
+                    training=is_training,
+                    momentum=self.batch_momentum,
+                    virtual_batch_size=v_b)
+                transform_f2 = (glu(transform_f2, self.feature_dim) +
+                                transform_f1) * np.sqrt(0.5)
+
+                transform_f3 = tf.layers.dense(
+                    transform_f2,
+                    self.feature_dim * 2,
+                    name="Transform_f3" + str(ni),
+                    use_bias=False)
+                transform_f3 = tf.layers.batch_normalization(
+                    transform_f3,
+                    training=is_training,
+                    momentum=self.batch_momentum,
+                    virtual_batch_size=v_b)
+                transform_f3 = (glu(transform_f3, self.feature_dim) +
+                                transform_f2) * np.sqrt(0.5)
+
+                transform_f4 = tf.layers.dense(
+                    transform_f3,
+                    self.feature_dim * 2,
+                    name="Transform_f4" + str(ni),
+                    use_bias=False)
+                transform_f4 = tf.layers.batch_normalization(
+                    transform_f4,
+                    training=is_training,
+                    momentum=self.batch_momentum,
+                    virtual_batch_size=v_b)
+                transform_f4 = (glu(transform_f4, self.feature_dim) +
+                                transform_f3) * np.sqrt(0.5)
+
+                if ni > 0:
+                    decision_out = tf.nn.relu(transform_f4[:, :self.output_dim_tabnet])
+
+                    # Decision aggregation.
+                    output_aggregated += decision_out
+
+                    # Aggregated masks are used for visualization of the
+                    # feature importance attributes.
+                    scale_agg = tf.reduce_sum(
+                        decision_out, axis=1, keep_dims=True) / (
+                                        self.num_decision_steps - 1)
+                    aggregated_mask_values += mask_values * scale_agg
+
+                features_for_coef = (transform_f4[:, self.output_dim_tabnet:])
+
+                if ni < self.num_decision_steps - 1:
+                    # Determines the feature masks via linear and nonlinear
+                    # transformations, taking into account of aggregated feature use.
+                    mask_values = tf.layers.dense(
+                        features_for_coef,
+                        self.num_features,
+                        name="Transform_coef" + str(ni),
+                        use_bias=False)
+                    mask_values = tf.layers.batch_normalization(
+                        mask_values,
+                        training=is_training,
+                        momentum=self.batch_momentum,
+                        virtual_batch_size=v_b)
+                    mask_values *= complemantary_aggregated_mask_values
+                    mask_values = tfa.activations.sparsemax(mask_values)
+
+                    # Relaxation factor controls the amount of reuse of features between
+                    # different decision blocks and updated with the values of
+                    # coefficients.
+                    complemantary_aggregated_mask_values *= (
+                            self.relaxation_factor - mask_values)
+
+                    # Entropy is used to penalize the amount of sparsity in feature
+                    # selection.
+                    total_entropy += tf.reduce_mean(
+                        tf.reduce_sum(
+                            -mask_values * tf.log(mask_values + self.epsilon),
+                            axis=1)) / (
+                                             self.num_decision_steps - 1)
+
+                    # Feature selection.
+                    masked_features = tf.multiply(mask_values, data)
+
+            return output_aggregated
+
     def build(self):
         with tf.variable_scope(self.name):
             self._build()
 
-        for i in range(FLAGS.batchSize):
+        """Embedding"""
+        self.mlp_inputs = []
+        for name, dim in self.d_feature_dim:
+            self.mlp_inputs.append(self.embedding_layers[name](self.mlp_inputs_d[name], 0))
+        self.mlp_inputs.append(self.mlp_inputs_c)
+        if self.batch_size == 1:
+            self.mlp_inputs = tf.concat([self.mlp_inputs[0]], axis=1)
+            self.is_training = False
+        else:
+            self.mlp_inputs = tf.concat(self.mlp_inputs, axis=1)
+            self.is_training = True
+        self.mlp_inputs = tf.concat([self.mlp_inputs], axis=1)
+
+        # TabNet
+        self.mlp_output = self._build_tabnet(self.mlp_inputs, is_training=self.is_training)
+        # if not self.reuse:
+        #     self.reuse = True
+
+        for i in range(self.batch_size):
             # Build sequential layer model
             """GCN"""
             self.gcn_outputs = [self.gcn_inputs[i]]
-            for layer in self.gcn_layers:
+            for layer in self.gcn_layers[:-1]:
                 hidden = layer(self.gcn_outputs[-1], i)
                 self.gcn_outputs.append(hidden)
                 if len(self.gcn_outputs)-1 == self.num_graphs:
@@ -433,24 +623,16 @@ class MMGCN(Model):
                     self.gcn_outputs.append(hidden)
             self.gcn_output = self.gcn_outputs[-1]
             self.gcn_output = tf.reshape(self.gcn_output, [1, self.num_nodes])
-            if FLAGS.gcn_dense:
-                self.gcn_output = self.gcn_layers[-1](self.gcn_output)
-
-            """Embedding"""
-            self.mlp_inputs = []
-            for name, dim in self.d_feature_dim:
-                self.mlp_inputs.append(self.embedding_layers[name](self.mlp_inputs_d[name][i], i))
-            self.mlp_inputs.append(self.mlp_inputs_c[i])
-            self.mlp_inputs = tf.concat(self.mlp_inputs, axis=1)
+            self.gcn_output = self.gcn_layers[-1](self.gcn_output, 0)
 
             """MLP"""
-            self.mlp_outputs = [self.mlp_inputs]
-            for layer in self.mlp_layers:
-                hidden = layer(self.mlp_outputs[-1], i)
-                self.mlp_outputs.append(hidden)
-            self.mlp_output = self.mlp_outputs[-1]
+            # self.mlp_outputs = [self.mlp_inputs]
+            # for layer in self.mlp_layers:
+            #     hidden = layer(self.mlp_outputs[-1], i)
+            #     self.mlp_outputs.append(hidden)
+            # self.mlp_output = self.mlp_outputs[-1]
 
-            self.fusion_inputs = tf.concat([self.gcn_output, self.mlp_output], axis=1)
+            self.fusion_inputs = tf.concat([self.gcn_output, tf.reshape(self.mlp_output[i], [1, -1])], axis=1)
 
             """Fusion"""
             self.fusion_outputs = [self.fusion_inputs]
