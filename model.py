@@ -164,12 +164,10 @@ class GCN(Model):
     def _loss(self):
         # Weight decay loss
         for var in self.layers[0].vars.values():
-            # print(var)
             self.loss += FLAGS.weight_decay * tf.nn.l2_loss(var)
 
         # Mean absolute error
         self.loss += mean_absolute_error(self.outputs, self.labels)
-            # tf.losses.mean_squared_error(self.outputs, self.placeholders['labels'])
 
     def _accuracy(self):
         self.accuracy = mean_absolute_error(self.outputs, self.labels)
@@ -257,7 +255,7 @@ class GCN(Model):
         self._loss()
         self._accuracy()
 
-        self.opt_op = self.optimizer.minimize(self.accuracy)
+        self.opt_op = self.optimizer.minimize(self.loss)
 
     def predict(self, outputs):
         return tf.nn.softplus(outputs)
@@ -293,6 +291,7 @@ class MMGCN(Model):
             self.mlp_inputs_d[name] = tf.concat(placeholders[name], 0)
         self.mlp_inputs = []                                                    # mlp特征
         self.fusion_inputs = None                                               # fusion特征
+        self.labels = tf.concat(placeholders['labels'], 0)
 
         # 层大小
         self.input_dim = input_dim                                              # gcn特征数
@@ -300,7 +299,7 @@ class MMGCN(Model):
         self.num_graphs = num_graphs                                            # GCN层数
         self.output_dim = placeholders['labels'][0].get_shape().as_list()[1]    # 模型输出大小
         self.mlp_input_dim = placeholders['con_features'][0].get_shape().as_list()[1] + \
-                             FLAGS.embed_solvent + FLAGS.embed_method2
+                             FLAGS.embed_dim*len(self.d_feature_dim)
 
         # 层list
         self.gcn_layers = []                                                    # GCN层
@@ -327,7 +326,7 @@ class MMGCN(Model):
         self.epsilon = epsilon
         self.reuse = False
 
-        self.optimizer = tf.train.AdamOptimizer(learning_rate=FLAGS.learning_rate)
+        self.optimizer = tf.train.AdamOptimizer(learning_rate=FLAGS.learning_rate, use_locking=True)
 
         self.build()
 
@@ -337,10 +336,10 @@ class MMGCN(Model):
             self.loss += FLAGS.weight_decay * tf.nn.l2_loss(var)
 
         # Mean absolute error
-        self.loss += mean_absolute_error(self.outputs, self.placeholders['labels'])
+        self.loss += mean_absolute_error(self.outputs, self.labels)
 
     def _accuracy(self):
-        self.accuracy = mean_absolute_error(self.outputs, self.placeholders['labels'])
+        self.accuracy = mean_absolute_error(self.outputs, self.labels)
 
     def _build(self):
         """
@@ -358,6 +357,7 @@ class MMGCN(Model):
             self.gcn_layers.append(GraphConvolution(input_dim=FLAGS.gcn_hidden,
                                                     output_dim=FLAGS.gcn_hidden,
                                                     placeholders=self.placeholders,
+                                                    act=tf.nn.relu,
                                                     dropout=False,
                                                     logging=self.logging))
 
@@ -365,93 +365,56 @@ class MMGCN(Model):
                                       output_dim=self.output_dim,
                                       placeholders=self.placeholders,
                                       act=tf.nn.relu,
-                                      dropout=False,
+                                      dropout=True,
                                       logging=self.logging))
 
-        self.gcn_layers.append(Dense1(input_dim=self.num_nodes,
-                                      output_dim=FLAGS.gcn_dense,
+        self.gcn_layers.append(Dense2(input_dim=FLAGS.gcn_dense,
+                                      output_dim=self.num_nodes,
                                       placeholders=self.placeholders,
-                                      act=tf.nn.relu,
-                                      dropout=True,
+                                      act=lambda x: x,
+                                      dropout=False,
                                       logging=self.logging))
 
         """
         Embedding
         """
-        self.embedding_layers[self.d_feature_dim[0][0]] = Dense1(
-            input_dim=self.d_feature_dim[0][1],
-            output_dim=FLAGS.embed_solvent,
-            placeholders=self.placeholders,
-            act=lambda x: x,
-            dropout=False,
-            bias=False,
-            logging=self.logging
-        )
-
-        self.embedding_layers[self.d_feature_dim[1][0]] = Dense1(
-            input_dim=self.d_feature_dim[1][1],
-            output_dim=FLAGS.embed_method2,
-            placeholders=self.placeholders,
-            act=lambda x: x,
-            dropout=False,
-            bias=False,
-            logging=self.logging
-        )
-
-        """
-        MLP
-        """
-        self.mlp_layers.append(Dense1(input_dim=self.mlp_input_dim,
-                                      output_dim=FLAGS.mlp_hidden1,
-                                      placeholders=self.placeholders,
-                                      act=tf.nn.relu,
-                                      dropout=True,
-                                      bias=True,
-                                      logging=self.logging))
-
-        self.mlp_layers.append(Dense1(input_dim=FLAGS.mlp_hidden1,
-                                      output_dim=FLAGS.mlp_hidden2,
-                                      placeholders=self.placeholders,
-                                      act=tf.nn.relu,
-                                      dropout=True,
-                                      bias=True,
-                                      logging=self.logging))
-
-        self.mlp_layers.append(Dense1(input_dim=FLAGS.mlp_hidden2,
-                                      output_dim=FLAGS.mlp_hidden3,
-                                      placeholders=self.placeholders,
-                                      act=tf.nn.relu,
-                                      dropout=True,
-                                      bias=True,
-                                      logging=self.logging))
-
+        for d_feature in self.d_feature_dim:
+            self.embedding_layers[d_feature[0]] = Dense1(
+                input_dim=d_feature[1],
+                output_dim=FLAGS.embed_dim,
+                placeholders=self.placeholders,
+                act=lambda x: x,
+                dropout=False,
+                bias=False,
+                logging=self.logging
+            )
 
         """Fusion"""
         if FLAGS.gcn_dense:
             fusion_input_dim = FLAGS.output_dim+FLAGS.gcn_dense
         else:
             fusion_input_dim = FLAGS.output_dim+self.num_nodes
+        # self.fusion_layers.append(Dense1(input_dim=fusion_input_dim,
+        #                                  output_dim=FLAGS.fusion_hidden1,
+        #                                  placeholders=self.placeholders,
+        #                                  act=tf.nn.relu,
+        #                                  dropout=True,
+        #                                  bias=True,
+        #                                  logging=self.logging))
+        #
+        # self.fusion_layers.append(Dense1(input_dim=FLAGS.fusion_hidden1,
+        #                                  output_dim=FLAGS.fusion_hidden2,
+        #                                  placeholders=self.placeholders,
+        #                                  act=tf.nn.relu,
+        #                                  dropout=True,
+        #                                  bias=True,
+        #                                  logging=self.logging))
+
         self.fusion_layers.append(Dense1(input_dim=fusion_input_dim,
-                                         output_dim=FLAGS.fusion_hidden1,
-                                         placeholders=self.placeholders,
-                                         act=tf.nn.relu,
-                                         dropout=True,
-                                         bias=True,
-                                         logging=self.logging))
-
-        self.fusion_layers.append(Dense1(input_dim=FLAGS.fusion_hidden1,
-                                         output_dim=FLAGS.fusion_hidden2,
-                                         placeholders=self.placeholders,
-                                         act=tf.nn.relu,
-                                         dropout=True,
-                                         bias=True,
-                                         logging=self.logging))
-
-        self.fusion_layers.append(Dense1(input_dim=FLAGS.fusion_hidden2,
                                          output_dim=self.output_dim,
                                          placeholders=self.placeholders,
-                                         act=tf.nn.relu,
-                                         dropout=True,
+                                         act=lambda x: x,
+                                         dropout=False,
                                          bias=True,
                                          logging=self.logging))
 
@@ -608,29 +571,25 @@ class MMGCN(Model):
         for i in range(self.batch_size):
             # Build sequential layer model
             """GCN"""
-            self.gcn_outputs = [self.gcn_inputs[i]]
-            for layer in self.gcn_layers[:-1]:
-                hidden = layer(self.gcn_outputs[-1], i)
-                self.gcn_outputs.append(hidden)
-                if len(self.gcn_outputs)-1 == self.num_graphs:
-                    gcn_output = tf.stack(self.gcn_outputs[1:], axis=1)             # 除掉输入
+            self.activations = [self.gcn_inputs[i]]
+            self.gcn_outputs = []
+            for layer in self.gcn_layers:
+                hidden = layer(self.activations[-1], i)
+                self.activations.append(hidden)
+                if len(self.gcn_outputs) < self.num_graphs:
+                    self.gcn_outputs.append(hidden)
+                if len(self.activations)-1 == self.num_graphs:
+                    gcn_output = tf.stack(self.gcn_outputs, axis=1)             # 除掉输入
                     gcn_output = tf.reshape(gcn_output, [1, self.num_graphs, self.num_nodes, FLAGS.gcn_hidden])
                     hidden = tf.nn.max_pool(gcn_output,
                                             ksize=[1, self.num_graphs, 1, 1],
                                             strides=[1, 1, 1, 1],
                                             padding='VALID')
                     hidden = tf.reshape(hidden, [self.num_nodes, FLAGS.gcn_hidden])
-                    self.gcn_outputs.append(hidden)
-            self.gcn_output = self.gcn_outputs[-1]
-            self.gcn_output = tf.reshape(self.gcn_output, [1, self.num_nodes])
-            self.gcn_output = self.gcn_layers[-1](self.gcn_output, 0)
-
-            """MLP"""
-            # self.mlp_outputs = [self.mlp_inputs]
-            # for layer in self.mlp_layers:
-            #     hidden = layer(self.mlp_outputs[-1], i)
-            #     self.mlp_outputs.append(hidden)
-            # self.mlp_output = self.mlp_outputs[-1]
+                    self.activations.append(hidden)
+            self.gcn_output = self.activations[-1]
+            self.gcn_output = tf.reshape(self.gcn_output, [1, FLAGS.gcn_dense])
+            # self.gcn_output = self.gcn_layers[-1](self.gcn_output, 0)
 
             self.fusion_inputs = tf.concat([self.gcn_output, tf.reshape(self.mlp_output[i], [1, -1])], axis=1)
 
