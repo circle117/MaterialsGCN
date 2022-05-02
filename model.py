@@ -304,11 +304,10 @@ class MMGCN(Model):
         # 层list
         self.gcn_layers = []                                                    # GCN层
         self.embedding_layers = {}                                              # Embedding层
-        self.mlp_layers = []                                                    # MLP层
-        self.fusion_layers = []                                                 # 融合层
+        self.dense_layers = []                                                    # MLP层
 
-        self.gcn_outputs = []                                                   # GCN每层输出
-        self.gcn_output = None                                                  # GCN最终输出
+        self.gcn_layer_output = []                                              # GCN每层输出
+        self.gcn_output = []                                                    # GCN最终输出
         self.mlp_outputs = []                                                   # MLP每层输出
         self.mlp_output = None                                                  # MLP最终输出
         self.fusion_outputs = []                                                # Fusion输出
@@ -325,8 +324,9 @@ class MMGCN(Model):
         self.virtual_batch_size = virtual_batch_size
         self.epsilon = epsilon
         self.reuse = False
+        self.tabnet_output = None
 
-        self.optimizer = tf.train.AdamOptimizer(learning_rate=FLAGS.learning_rate, use_locking=True)
+        self.optimizer = tf.train.AdamOptimizer(learning_rate=FLAGS.learning_rate)
 
         self.build()
 
@@ -341,7 +341,7 @@ class MMGCN(Model):
     def _accuracy(self):
         self.accuracy = mean_absolute_error(self.outputs, self.labels)
 
-    def _build(self):
+    def _build_gcn(self):
         """
         GCN
         """
@@ -366,6 +366,7 @@ class MMGCN(Model):
                                       placeholders=self.placeholders,
                                       act=tf.nn.relu,
                                       dropout=True,
+                                      bias=True,
                                       logging=self.logging))
 
         self.gcn_layers.append(Dense2(input_dim=FLAGS.gcn_dense,
@@ -373,8 +374,10 @@ class MMGCN(Model):
                                       placeholders=self.placeholders,
                                       act=lambda x: x,
                                       dropout=False,
+                                      bias=True,
                                       logging=self.logging))
 
+    def _build_model(self):
         """
         Embedding
         """
@@ -389,37 +392,19 @@ class MMGCN(Model):
                 logging=self.logging
             )
 
-        """Fusion"""
-        if FLAGS.gcn_dense:
-            fusion_input_dim = FLAGS.output_dim+FLAGS.gcn_dense
-        else:
-            fusion_input_dim = FLAGS.output_dim+self.num_nodes
-        # self.fusion_layers.append(Dense1(input_dim=fusion_input_dim,
-        #                                  output_dim=FLAGS.fusion_hidden1,
-        #                                  placeholders=self.placeholders,
-        #                                  act=tf.nn.relu,
-        #                                  dropout=True,
-        #                                  bias=True,
-        #                                  logging=self.logging))
-        #
-        # self.fusion_layers.append(Dense1(input_dim=FLAGS.fusion_hidden1,
-        #                                  output_dim=FLAGS.fusion_hidden2,
-        #                                  placeholders=self.placeholders,
-        #                                  act=tf.nn.relu,
-        #                                  dropout=True,
-        #                                  bias=True,
-        #                                  logging=self.logging))
-
-        self.fusion_layers.append(Dense1(input_dim=fusion_input_dim,
-                                         output_dim=self.output_dim,
-                                         placeholders=self.placeholders,
-                                         act=lambda x: x,
-                                         dropout=False,
-                                         bias=True,
-                                         logging=self.logging))
+        """
+        Dense
+        """
+        self.dense_layers.append(Dense1(input_dim=FLAGS.output_dim,
+                                        output_dim=self.output_dim,
+                                        placeholders=self.placeholders,
+                                        act=lambda x: x,
+                                        dropout=False,
+                                        bias=True,
+                                        logging=self.logging))
 
     def _build_tabnet(self, data, is_training):
-        with tf.variable_scope(self.name, reuse=self.reuse):
+        with tf.variable_scope('tabnet', reuse=self.reuse):
             masked_features = data
             batch_size = tf.shape(masked_features)[0]
 
@@ -547,11 +532,40 @@ class MMGCN(Model):
             return output_aggregated
 
     def build(self):
-        with tf.variable_scope(self.name):
-            self._build()
+        with tf.variable_scope('gcn'):
+            self._build_gcn()
 
-        """Embedding"""
-        self.mlp_inputs = []
+        with tf.variable_scope('tabnet'):
+            self._build_model()
+
+        self.gcn_output = []
+        for i in range(self.batch_size):
+            # Build sequential layer model
+            """GCN"""
+            self.activations = [self.gcn_inputs[i]]
+            self.gcn_layer_output = []
+            for layer in self.gcn_layers:
+                hidden = layer(self.activations[-1], i)
+                self.activations.append(hidden)
+                if len(self.gcn_layer_output) < self.num_graphs:
+                    self.gcn_layer_output.append(hidden)
+                if len(self.activations)-1 == self.num_graphs:
+                    gcn_output = tf.stack(self.gcn_layer_output, axis=1)
+                    gcn_output = tf.reshape(gcn_output, [1, self.num_graphs, self.num_nodes, FLAGS.gcn_hidden])
+                    hidden = tf.nn.max_pool(gcn_output,
+                                            ksize=[1, self.num_graphs, 1, 1],
+                                            strides=[1, 1, 1, 1],
+                                            padding='VALID')
+                    hidden = tf.reshape(hidden, [self.num_nodes, FLAGS.gcn_hidden])
+                    self.activations.append(hidden)
+            self.gcn_output.append(self.predict(self.activations[-1]))
+
+        self.gcn_output = tf.concat(self.gcn_output, axis=0)
+
+        """
+        Embedding
+        """
+        self.mlp_inputs = [self.gcn_output]
         for name, dim in self.d_feature_dim:
             self.mlp_inputs.append(self.embedding_layers[name](self.mlp_inputs_d[name], 0))
         self.mlp_inputs.append(self.mlp_inputs_c)
@@ -563,54 +577,35 @@ class MMGCN(Model):
             self.is_training = True
         self.mlp_inputs = tf.concat([self.mlp_inputs], axis=1)
 
-        # TabNet
-        self.mlp_output = self._build_tabnet(self.mlp_inputs, is_training=self.is_training)
-        # if not self.reuse:
-        #     self.reuse = True
+        """
+        TabNet
+        """
+        self.tabnet_output = self._build_tabnet(self.mlp_inputs, is_training=self.is_training)
+        if not self.reuse:
+            self.reuse = True
 
-        for i in range(self.batch_size):
-            # Build sequential layer model
-            """GCN"""
-            self.activations = [self.gcn_inputs[i]]
-            self.gcn_outputs = []
-            for layer in self.gcn_layers:
-                hidden = layer(self.activations[-1], i)
-                self.activations.append(hidden)
-                if len(self.gcn_outputs) < self.num_graphs:
-                    self.gcn_outputs.append(hidden)
-                if len(self.activations)-1 == self.num_graphs:
-                    gcn_output = tf.stack(self.gcn_outputs, axis=1)             # 除掉输入
-                    gcn_output = tf.reshape(gcn_output, [1, self.num_graphs, self.num_nodes, FLAGS.gcn_hidden])
-                    hidden = tf.nn.max_pool(gcn_output,
-                                            ksize=[1, self.num_graphs, 1, 1],
-                                            strides=[1, 1, 1, 1],
-                                            padding='VALID')
-                    hidden = tf.reshape(hidden, [self.num_nodes, FLAGS.gcn_hidden])
-                    self.activations.append(hidden)
-            self.gcn_output = self.activations[-1]
-            self.gcn_output = tf.reshape(self.gcn_output, [1, FLAGS.gcn_dense])
-            # self.gcn_output = self.gcn_layers[-1](self.gcn_output, 0)
-
-            self.fusion_inputs = tf.concat([self.gcn_output, tf.reshape(self.mlp_output[i], [1, -1])], axis=1)
-
-            """Fusion"""
-            self.fusion_outputs = [self.fusion_inputs]
-            for layer in self.fusion_layers:
-                hidden = layer(self.fusion_outputs[-1], i)
-                self.fusion_outputs.append(hidden)
-            self.outputs.append(self.predict(self.fusion_outputs[-1]))
-
-        self.outputs = tf.concat(self.outputs, axis=0)
+        if FLAGS.gcn_train:
+            self.outputs = self.gcn_output
+        else:
+            self.outputs = self.predict(self.dense_layers[0](self.tabnet_output, 0))
+            self.temp = self.gcn_output
 
         # Store model variables for easy access
-        variables = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope=self.name)
-        self.vars = {var.name: var for var in variables}
+        variables_gcn = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope='gcn')
+        self.vars = {var.name: var for var in variables_gcn}
+        variables_tabnet = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope='tabnet')
+        for var in variables_tabnet:
+            self.vars[var.name] = var
 
         # Build metrics
         self._loss()
         self._accuracy()
 
-        self.opt_op = self.optimizer.minimize(self.loss)
+        if FLAGS.gcn_train:
+            self.opt_op = self.optimizer.minimize(self.loss)
+        else:
+            grads_and_vars = self.optimizer.compute_gradients(self.accuracy, variables_tabnet)
+            self.opt_op = self.optimizer.apply_gradients(grads_and_vars)
 
     def predict(self, output):
         return tf.nn.softplus(output)

@@ -20,7 +20,7 @@ FEATURE_NAME = {'discrete': ['Solvent', 'method2'],
                 'continuous': ['temperature1', 'time1', 'minTemp', 'maxTemp', 'time2']}
 
 # Set random seed
-seed = 117
+seed = 123
 np.random.seed(seed)
 tf.set_random_seed(seed)
 
@@ -32,34 +32,32 @@ flags = tf.app.flags
 FLAGS = flags.FLAGS
 # path
 flags.DEFINE_string('dataset', './dataset/dataMethod2Deleted.csv', 'Dataset string.')
-flags.DEFINE_string('savepath', './myMMGCN/MMGCN_1', 'Save path sting')
+flags.DEFINE_string('savepath', './myMMGCN/MMGCN_6', 'Save path sting')
+flags.DEFINE_string('store_path', './myMMGCN/MMGCN_5/mmgcn.ckpt', 'Store path string')
 flags.DEFINE_float('val_ratio', 0.1, 'Ratio of validation dataset')
 flags.DEFINE_float('test_ratio', 0.1, 'Ratio of validation dataset')
 # Model
 flags.DEFINE_string('model', 'mmgcn', 'Model string.')      # 'gcn', 'mmgen
-flags.DEFINE_float('learning_rate', 0.01, 'Initial learning rate.')
-flags.DEFINE_integer('epochs', 500, 'Number of epochs to train.')
+flags.DEFINE_float('learning_rate', 0.1, 'Initial learning rate.')
+flags.DEFINE_integer('epochs', 200, 'Number of epochs to train.')
 flags.DEFINE_float('dropout', 0.3, 'Dropout rate (1 - keep probability).')
 flags.DEFINE_float('weight_decay', 5e-2, 'Weight for L2 loss on embedding matrix.')
-flags.DEFINE_integer('early_stopping', 50, 'Tolerance for early stopping (# of epochs).')
+flags.DEFINE_integer('early_stopping_begin', 40, 'Tolerance for early stopping')
+flags.DEFINE_integer('early_stopping', 10, 'Tolerance for early stopping (# of epochs).')
 flags.DEFINE_integer('batchSize', 16, 'Number of batch size')
+flags.DEFINE_boolean('gcn_train', True, 'train GCN or MMGCN')
 # GCN
 flags.DEFINE_integer('gcn_hidden', 64, 'Number of units in GCN hidden layer .')
 flags.DEFINE_integer('num_graphs', 5, 'Number of units in hidden layer 3.')
 flags.DEFINE_integer('max_degree', 2, 'Maximum Chebyshev polynomial degree.')
-flags.DEFINE_integer('gcn_dense', 16, 'If do gcn dense')
-# TabNet
-flags.DEFINE_integer('feature_dim', 32, 'hidden representation in feature transformation block')
-flags.DEFINE_integer('output_dim', 8, 'output dimension of every decision step')
-flags.DEFINE_integer('num_decision_steps', 8, 'Number of decision step')
-flags.DEFINE_integer('relaxation_factor', 2, 'Number of feature usage')
+flags.DEFINE_integer('gcn_dense', 1, 'If do gcn dense')
 # Embedding
-flags.DEFINE_integer('embed_solvent', 1, 'Number of units in Embedding1 layer')         # Solvent
-flags.DEFINE_integer('embed_method2', 1, 'Number of units in Embedding3 layer')         # Method2
-# MLP
-flags.DEFINE_integer('mlp_hidden1', 32, 'Number of units in MLP hidden layer1')
-flags.DEFINE_integer('mlp_hidden2', 64, 'Number of units in MLP hidden layer2')
-flags.DEFINE_integer('mlp_hidden3', 32, 'Number of units in MLP hidden layer3')
+flags.DEFINE_integer('embed_dim', 1, 'Number of units in Embedding layer')
+# TabNet
+flags.DEFINE_integer('feature_dim', 8, 'hidden representation in feature transformation block')
+flags.DEFINE_integer('output_dim', 4, 'output dimension of every decision step')
+flags.DEFINE_integer('num_decision_steps', 8, 'Number of decision step')
+flags.DEFINE_float('relaxation_factor', 3, 'Number of feature usage')
 # Fusion
 flags.DEFINE_integer('fusion_hidden1', 32, 'Number of units in Fusion hidden layer1')
 flags.DEFINE_integer('fusion_hidden2', 16, 'Number of units in Fusion hidden layer2')
@@ -80,7 +78,7 @@ print('离散数据大小: (%d, %d),' % (len(discrete_features[FEATURE_NAME['dis
 """
 preprocessing
 """
-# GCN
+# model
 gcn_features = list(map(preprocess_features, gcn_features))
 if FLAGS.model == 'gcn':
     supports = []
@@ -125,9 +123,8 @@ supports_train, gcn_features_train, y_train, supports_val, features_val, y_val =
                                                                                                      FLAGS.test_ratio)
 # MMGCN
 discrete_features_train, discrete_features_val, continuous_features_train, continuous_features_val = \
-    train_test_split_mlp(discrete_features, continuous_features, FLAGS.val_ratio)
+    train_val_split_mlp(discrete_features, continuous_features, FLAGS.val_ratio, FLAGS.test_ratio)
 list_for_shuffle = list(range(len(supports_train)))
-list_for_shuffle_val = list(range(len(supports_val)))
 
 """
 Define placeholders
@@ -155,10 +152,10 @@ for i in range(FLAGS.batchSize):
         support.append(tf.sparse_placeholder(tf.float32))
     supportBatch.append(support)
 placeholders['support'] = supportBatch
-
+# discrete features
 for key, value in discrete_features.items():
     placeholders[key] = [tf.placeholder(tf.float32, shape=(None, value.shape[1])) for _ in range(FLAGS.batchSize)]
-
+# discrete features dimension
 d_feature_dim = []
 for name in FEATURE_NAME['discrete']:
     d_feature_dim.append((name, discrete_features_train[name].shape[1]))
@@ -171,7 +168,7 @@ model = model_func(placeholders,
                    num_nodes=gcn_features[0][2][0],
                    num_graphs=FLAGS.num_graphs,
                    d_feature_dim=d_feature_dim,
-                   num_features=len(FEATURE_NAME['continuous'])+len(FEATURE_NAME['discrete']),
+                   num_features=len(FEATURE_NAME['continuous'])+len(FEATURE_NAME['discrete'])+1,
                    feature_dim=FLAGS.feature_dim,
                    output_dim=FLAGS.output_dim,
                    num_decision_steps=FLAGS.num_decision_steps,
@@ -200,7 +197,8 @@ def evaluate(features, supports, y, con_features, dis_features, placeholders):
             batch['continuous_features'].append(con_features[i].reshape(1, -1))
             for name in FEATURE_NAME['discrete']:
                 batch[name].append(dis_features[name][i].reshape(1, -1))
-        feed_dict_val = my_construct_feed_dict(batch['feature'], batch['support'], batch['y'],
+        feed_dict_val = my_construct_feed_dict(batch['feature'],
+                                               batch['support'], batch['y'],
                                                batch['continuous_features'], batch,
                                                FEATURE_NAME['discrete'], placeholders)
         outs = sess.run([model.loss, model.accuracy], feed_dict=feed_dict_val)
@@ -213,9 +211,11 @@ def evaluate(features, supports, y, con_features, dis_features, placeholders):
 Train
 """
 sess = tf.Session()
-sess.run(tf.global_variables_initializer())
-
-saver = tf.train.Saver()
+if FLAGS.gcn_train:
+    sess.run(tf.global_variables_initializer())
+else:
+    sess.run(tf.global_variables_initializer())
+    model.load(sess, FLAGS.store_path)
 
 val_record = []
 start = time.time()
@@ -266,9 +266,8 @@ for epoch in range(FLAGS.epochs):
           "val_acc=", "{:.5f}".format(accu_val), "time=", "{:.5f}".format(time.time() - t))
 
     random.shuffle(list_for_shuffle)                        # 每个epoch结束后，shuffle
-    random.shuffle(list_for_shuffle_val)
 
-    if epoch>FLAGS.early_stopping and val_record[-1]>np.mean(val_record[-(FLAGS.early_stopping+1):-1]):
+    if epoch>FLAGS.early_stopping_begin and val_record[-1]>np.mean(val_record[-(FLAGS.early_stopping+1):-1]):
         print('Early stopping...')
         break
     else:
