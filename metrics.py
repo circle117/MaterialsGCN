@@ -14,6 +14,7 @@ def mean_absolute_error(preds, labels):
     res = tf.reduce_mean(tf.abs(preds-labels))
     return res
 
+
 def masked_softmax_cross_entropy(preds, labels, mask):
     """Softmax cross-entropy loss with masking."""
     loss = tf.nn.softmax_cross_entropy_with_logits(logits=preds, labels=labels)

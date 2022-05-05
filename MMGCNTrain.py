@@ -32,20 +32,20 @@ flags = tf.app.flags
 FLAGS = flags.FLAGS
 # path
 flags.DEFINE_string('dataset', './dataset/dataMethod2Deleted.csv', 'Dataset string.')
-flags.DEFINE_string('savepath', './myMMGCN/MMGCN_6', 'Save path sting')
+flags.DEFINE_string('savepath', './myMMGCN/tmp', 'Save path sting')
 flags.DEFINE_string('store_path', './myMMGCN/MMGCN_5/mmgcn.ckpt', 'Store path string')
 flags.DEFINE_float('val_ratio', 0.1, 'Ratio of validation dataset')
 flags.DEFINE_float('test_ratio', 0.1, 'Ratio of validation dataset')
 # Model
 flags.DEFINE_string('model', 'mmgcn', 'Model string.')      # 'gcn', 'mmgen
-flags.DEFINE_float('learning_rate', 0.1, 'Initial learning rate.')
+flags.DEFINE_float('learning_rate', 0.01, 'Initial learning rate.')
 flags.DEFINE_integer('epochs', 200, 'Number of epochs to train.')
 flags.DEFINE_float('dropout', 0.3, 'Dropout rate (1 - keep probability).')
 flags.DEFINE_float('weight_decay', 5e-2, 'Weight for L2 loss on embedding matrix.')
-flags.DEFINE_integer('early_stopping_begin', 40, 'Tolerance for early stopping')
+flags.DEFINE_integer('early_stopping_begin', 15, 'Tolerance for early stopping')
 flags.DEFINE_integer('early_stopping', 10, 'Tolerance for early stopping (# of epochs).')
 flags.DEFINE_integer('batchSize', 16, 'Number of batch size')
-flags.DEFINE_boolean('gcn_train', True, 'train GCN or MMGCN')
+flags.DEFINE_boolean('gcn_train', False, 'train GCN or MMGCN')
 # GCN
 flags.DEFINE_integer('gcn_hidden', 64, 'Number of units in GCN hidden layer .')
 flags.DEFINE_integer('num_graphs', 5, 'Number of units in hidden layer 3.')
@@ -56,11 +56,8 @@ flags.DEFINE_integer('embed_dim', 1, 'Number of units in Embedding layer')
 # TabNet
 flags.DEFINE_integer('feature_dim', 8, 'hidden representation in feature transformation block')
 flags.DEFINE_integer('output_dim', 4, 'output dimension of every decision step')
-flags.DEFINE_integer('num_decision_steps', 8, 'Number of decision step')
-flags.DEFINE_float('relaxation_factor', 3, 'Number of feature usage')
-# Fusion
-flags.DEFINE_integer('fusion_hidden1', 32, 'Number of units in Fusion hidden layer1')
-flags.DEFINE_integer('fusion_hidden2', 16, 'Number of units in Fusion hidden layer2')
+flags.DEFINE_integer('num_decision_steps', 4, 'Number of decision step')
+flags.DEFINE_float('relaxation_factor', 1.5, 'Number of feature usage')
 
 
 """
@@ -168,7 +165,7 @@ model = model_func(placeholders,
                    num_nodes=gcn_features[0][2][0],
                    num_graphs=FLAGS.num_graphs,
                    d_feature_dim=d_feature_dim,
-                   num_features=len(FEATURE_NAME['continuous'])+len(FEATURE_NAME['discrete'])+1,
+                   num_features=len(FEATURE_NAME['continuous'])+len(FEATURE_NAME['discrete']),
                    feature_dim=FLAGS.feature_dim,
                    output_dim=FLAGS.output_dim,
                    num_decision_steps=FLAGS.num_decision_steps,
@@ -250,6 +247,7 @@ for epoch in range(FLAGS.epochs):
         feed_dict.update({placeholders['dropout']: FLAGS.dropout})
 
         outs = sess.run([model.opt_op, model.loss, model.accuracy], feed_dict=feed_dict)
+        # print(sess.run(model.outputs, feed_dict=feed_dict))
         loss.append(outs[1])
         accu.append(outs[2])
     loss_train = np.mean(loss)

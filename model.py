@@ -39,6 +39,8 @@ class Model(object):
         self.accuracy = 0
         self.optimizer = None
         self.opt_op = None
+        self.opt_op_1 = None
+        self.opt_op_2 = None
 
         self.save_path = None
 
@@ -282,36 +284,37 @@ class MMGCN(Model):
         self.batch_size = len(placeholders['features'])
         self.is_training = True
 
-        # 特征
+        # 输入特征
         self.gcn_inputs = placeholders['features']                              # GCN特征
-        self.mlp_inputs_c = tf.concat(placeholders['con_features'], 0)          # 连续特征
-        self.mlp_inputs_d = {}                                                  # 离散特征
+        self.tabnet_inputs_c = tf.concat(placeholders['con_features'], 0)       # 连续特征
+        self.tabnet_inputs_d = {}                                               # 离散特征
         self.d_feature_dim = d_feature_dim                                      # 离散特征名称及dim
         for name, dim in self.d_feature_dim:
-            self.mlp_inputs_d[name] = tf.concat(placeholders[name], 0)
-        self.mlp_inputs = []                                                    # mlp特征
+            self.tabnet_inputs_d[name] = tf.concat(placeholders[name], 0)
+        self.tabnet_inputs = []                                                 # tabnet输入特征
         self.fusion_inputs = None                                               # fusion特征
-        self.labels = tf.concat(placeholders['labels'], 0)
+        self.labels = tf.concat(placeholders['labels'], 0)                      # target
 
         # 层大小
         self.input_dim = input_dim                                              # gcn特征数
         self.num_nodes = num_nodes                                              # gcn节点数
         self.num_graphs = num_graphs                                            # GCN层数
         self.output_dim = placeholders['labels'][0].get_shape().as_list()[1]    # 模型输出大小
-        self.mlp_input_dim = placeholders['con_features'][0].get_shape().as_list()[1] + \
-                             FLAGS.embed_dim*len(self.d_feature_dim)
+        # self.tabnet_input_dim = placeholders['con_features'][0].get_shape().as_list()[1] + \
+        #                      FLAGS.embed_dim*len(self.d_feature_dim)
 
-        # 层list
+        # 层
         self.gcn_layers = []                                                    # GCN层
         self.embedding_layers = {}                                              # Embedding层
-        self.dense_layers = []                                                    # MLP层
+        self.dense_layer = None                                                 # fusion层
 
+        # 输出
         self.gcn_layer_output = []                                              # GCN每层输出
         self.gcn_output = []                                                    # GCN最终输出
-        self.mlp_outputs = []                                                   # MLP每层输出
-        self.mlp_output = None                                                  # MLP最终输出
-        self.fusion_outputs = []                                                # Fusion输出
+        self.tabnet_output = None
         self.outputs = []
+
+        # placeholders
         self.placeholders = placeholders
 
         # Tabnet parameters
@@ -324,7 +327,6 @@ class MMGCN(Model):
         self.virtual_batch_size = virtual_batch_size
         self.epsilon = epsilon
         self.reuse = False
-        self.tabnet_output = None
 
         self.optimizer = tf.train.AdamOptimizer(learning_rate=FLAGS.learning_rate)
 
@@ -395,13 +397,13 @@ class MMGCN(Model):
         """
         Dense
         """
-        self.dense_layers.append(Dense1(input_dim=FLAGS.output_dim,
-                                        output_dim=self.output_dim,
-                                        placeholders=self.placeholders,
-                                        act=lambda x: x,
-                                        dropout=False,
-                                        bias=True,
-                                        logging=self.logging))
+        self.dense_layer = Dense1(input_dim=FLAGS.output_dim+FLAGS.gcn_dense,
+                                  output_dim=self.output_dim,
+                                  placeholders=self.placeholders,
+                                  act=lambda x: x,
+                                  dropout=False,
+                                  bias=False,
+                                  logging=self.logging)
 
     def _build_tabnet(self, data, is_training):
         with tf.variable_scope('tabnet', reuse=self.reuse):
@@ -540,8 +542,9 @@ class MMGCN(Model):
 
         self.gcn_output = []
         for i in range(self.batch_size):
-            # Build sequential layer model
-            """GCN"""
+            """
+            GCN
+            """
             self.activations = [self.gcn_inputs[i]]
             self.gcn_layer_output = []
             for layer in self.gcn_layers:
@@ -565,29 +568,30 @@ class MMGCN(Model):
         """
         Embedding
         """
-        self.mlp_inputs = [self.gcn_output]
+        self.tabnet_inputs = []
         for name, dim in self.d_feature_dim:
-            self.mlp_inputs.append(self.embedding_layers[name](self.mlp_inputs_d[name], 0))
-        self.mlp_inputs.append(self.mlp_inputs_c)
+            self.tabnet_inputs.append(self.embedding_layers[name](self.tabnet_inputs_d[name], 0))
+        self.tabnet_inputs.append(self.tabnet_inputs_c)
         if self.batch_size == 1:
-            self.mlp_inputs = tf.concat([self.mlp_inputs[0]], axis=1)
+            self.tabnet_inputs = tf.concat([self.tabnet_inputs[0]], axis=1)
             self.is_training = False
         else:
-            self.mlp_inputs = tf.concat(self.mlp_inputs, axis=1)
+            self.tabnet_inputs = tf.concat(self.tabnet_inputs, axis=1)
             self.is_training = True
-        self.mlp_inputs = tf.concat([self.mlp_inputs], axis=1)
+        # self.tabnet_inputs = tf.concat(self.tabnet_inputs, axis=1)
 
         """
         TabNet
         """
-        self.tabnet_output = self._build_tabnet(self.mlp_inputs, is_training=self.is_training)
+        self.tabnet_output = self._build_tabnet(self.tabnet_inputs, is_training=self.is_training)
         if not self.reuse:
             self.reuse = True
 
         if FLAGS.gcn_train:
             self.outputs = self.gcn_output
         else:
-            self.outputs = self.predict(self.dense_layers[0](self.tabnet_output, 0))
+            self.fusion_inputs = tf.concat([self.gcn_output, self.tabnet_output], axis=1)
+            self.outputs = self.dense_layer(self.fusion_inputs, 0)
             self.temp = self.gcn_output
 
         # Store model variables for easy access
