@@ -3,10 +3,6 @@ from MyUtils import *
 from utils import *
 from model import GCN, MLP, MMGCN
 
-import time
-import random
-import os
-
 tf.disable_v2_behavior()
 tf.disable_eager_execution()
 
@@ -32,8 +28,8 @@ flags = tf.app.flags
 FLAGS = flags.FLAGS
 # path
 flags.DEFINE_string('dataset', './dataset/dataMethod2Deleted.csv', 'Dataset string.')
-flags.DEFINE_string('savepath', './myMMGCN/MMGCN_6', 'Save path sting')
-flags.DEFINE_string('store_path', './myMMGCN/MMGCN_5/mmgcn.ckpt', 'Store path string')
+flags.DEFINE_string('savepath', './myMMGCN/tmp', 'Save path sting')
+flags.DEFINE_string('store_path', './myMMGCN/tmp/mmgcn.ckpt', 'Store path string')
 flags.DEFINE_float('val_ratio', 0.1, 'Ratio of validation dataset')
 flags.DEFINE_float('test_ratio', 0.1, 'Ratio of validation dataset')
 # Model
@@ -42,9 +38,9 @@ flags.DEFINE_float('learning_rate', 0.01, 'Initial learning rate.')
 flags.DEFINE_integer('epochs', 200, 'Number of epochs to train.')
 flags.DEFINE_float('dropout', 0.3, 'Dropout rate (1 - keep probability).')
 flags.DEFINE_float('weight_decay', 5e-2, 'Weight for L2 loss on embedding matrix.')
-flags.DEFINE_integer('early_stopping_begin', 10, 'Tolerance for early stopping')
+flags.DEFINE_integer('early_stopping_begin', 15, 'Tolerance for early stopping')
 flags.DEFINE_integer('early_stopping', 10, 'Tolerance for early stopping (# of epochs).')
-flags.DEFINE_integer('batchSize', 32, 'Number of batch size')
+flags.DEFINE_integer('batchSize', 1, 'Number of batch size')
 flags.DEFINE_boolean('gcn_train', False, 'train GCN or MMGCN')
 # GCN
 flags.DEFINE_integer('gcn_hidden', 64, 'Number of units in GCN hidden layer .')
@@ -113,15 +109,18 @@ continuous_features = preprocess_cfeatures(continuous_features)
 train val split
 """
 # GCN
-supports_train, gcn_features_train, y_train, supports_val, features_val, y_val = train_val_split_gcn(supports,
+supports_train, gcn_features_train, y_train, supports_val, gcn_features_val, y_val = train_val_split_gcn(supports,
                                                                                                      gcn_features,
                                                                                                      y,
                                                                                                      FLAGS.val_ratio,
                                                                                                      FLAGS.test_ratio)
+supports_test, gcn_features_test, y_test = test_split_gcn(supports, gcn_features, y, FLAGS.test_ratio)
+
 # MMGCN
 discrete_features_train, discrete_features_val, continuous_features_train, continuous_features_val = \
     train_val_split_mmgcn(discrete_features, continuous_features, FLAGS.val_ratio, FLAGS.test_ratio)
-list_for_shuffle = list(range(len(supports_train)))
+discrete_features_test, continuous_features_test = test_split_mmgcn(discrete_features, continuous_features,
+                                                                  FLAGS.test_ratio)
 
 """
 Define placeholders
@@ -173,109 +172,122 @@ model = model_func(placeholders,
                    batch_momentum=0.99,
                    virtual_batch_size=FLAGS.batchSize,
                    epsilon=0.00001,
-                   is_training=True,
+                   is_training=False,
                    logging=True)
-
-
-def evaluate(features, supports, y, con_features, dis_features, placeholders):
-    loss = []
-    accu = []
-    for i in range(len(features)):
-        batch = {'feature': [],
-                 'support': [],
-                 'y': [],
-                 'continuous_features': []}
-        for name in FEATURE_NAME['discrete']:
-            batch[name] = []
-        for _ in range(FLAGS.batchSize):
-            batch['feature'].append(features[i])
-            batch['support'].append(supports[i])
-            batch['y'].append(y[i, :].reshape(-1, 1))
-            batch['continuous_features'].append(con_features[i].reshape(1, -1))
-            for name in FEATURE_NAME['discrete']:
-                batch[name].append(dis_features[name][i].reshape(1, -1))
-        feed_dict_val = my_construct_feed_dict(batch['feature'],
-                                               batch['support'], batch['y'],
-                                               batch['continuous_features'], batch,
-                                               FEATURE_NAME['discrete'], placeholders)
-        outs = sess.run([model.loss, model.accuracy], feed_dict=feed_dict_val)
-        loss.append(outs[0])
-        accu.append(outs[1])
-    return np.mean(loss), np.mean(accu)
-
 
 """
 Train
 """
 sess = tf.Session()
-if FLAGS.gcn_train:
-    sess.run(tf.global_variables_initializer())
-else:
-    sess.run(tf.global_variables_initializer())
-    model.load(sess, FLAGS.store_path)
+model.load(sess, FLAGS.store_path)
 
-val_record = []
-start = time.time()
-for epoch in range(FLAGS.epochs):
+loss = []
+accu = []
+i = 0
+# model.batch_size = 1
+model.batch_size = FLAGS.batchSize
+# train
+while i < len(gcn_features_train):
+    batch = {'feature': [],
+             'support': [],
+             'y': [],
+             'continuous_features': []}
+    for name in FEATURE_NAME['discrete']:
+        batch[name] = []
+    # for _ in range(FLAGS.batchSize):
+    batch['feature'].append(gcn_features_train[i])
+    batch['support'].append(supports_train[i])
+    batch['y'].append(y_train[i, :].reshape(-1, 1))
+    batch['continuous_features'].append(continuous_features_train[i].reshape(1, -1))
+    for name in FEATURE_NAME['discrete']:
+        batch[name].append(discrete_features_train[name][i].reshape(1, -1))
+        # i += 1
+    i += 1
+    feed_dict = my_construct_feed_dict(batch['feature'], batch['support'], batch['y'],
+                                       batch['continuous_features'], batch, FEATURE_NAME['discrete'],
+                                       placeholders)
+    feed_dict.update({placeholders['dropout']: FLAGS.dropout})
 
-    t = time.time()
-    loss = []
-    accu = []
-    i = 0
-    model.batch_size = FLAGS.batchSize
-    while i < len(list_for_shuffle):
-        batch = {'feature': [],
-                 'support': [],
-                 'y': [],
-                 'continuous_features': []}
-        for name in FEATURE_NAME['discrete']:
-            batch[name] = []
+    outs = sess.run([model.loss, model.accuracy], feed_dict=feed_dict)
+    # print(sess.run(model.labels, feed_dict=feed_dict))
+    loss.append(outs[0])
+    accu.append(outs[1])
+    # print(outs)
+loss_train = np.mean(loss)
+accu_train = np.mean(accu)
 
-        if len(list_for_shuffle) - i < FLAGS.batchSize:
-            break
-        else:
-            for _ in range(FLAGS.batchSize):
-                batch['feature'].append(gcn_features_train[list_for_shuffle[i]])
-                batch['support'].append(supports_train[list_for_shuffle[i]])
-                batch['y'].append(y_train[list_for_shuffle[i], :].reshape(-1, 1))
-                batch['continuous_features'].append(continuous_features_train[list_for_shuffle[i]].reshape(1, -1))
-                for name in FEATURE_NAME['discrete']:
-                    batch[name].append(discrete_features_train[name][list_for_shuffle[i]].reshape(1, -1))
-                i += 1
-            feed_dict = my_construct_feed_dict(batch['feature'], batch['support'], batch['y'],
-                                               batch['continuous_features'], batch, FEATURE_NAME['discrete'],
-                                               placeholders)
-            feed_dict.update({placeholders['dropout']: FLAGS.dropout})
+print("train_loss=", "{:.5f}".format(loss_train), "train_acc=", "{:.5f}".format(accu_train))
 
-        outs = sess.run([model.opt_op, model.loss, model.accuracy], feed_dict=feed_dict)
-        # print(sess.run(model.outputs, feed_dict=feed_dict))
-        loss.append(outs[1])
-        accu.append(outs[2])
-    loss_train = np.mean(loss)
-    accu_train = np.mean(accu)
 
-    # val
-    loss_val, accu_val = evaluate(features_val, supports_val, y_val,
-                                  continuous_features_val, discrete_features_val,
-                                  placeholders)
-    val_record.append(accu_val)
+loss = []
+accu = []
+i = 0
+# val
+while i < len(gcn_features_val):
+    batch = {'feature': [],
+             'support': [],
+             'y': [],
+             'continuous_features': []}
+    for name in FEATURE_NAME['discrete']:
+        batch[name] = []
+    # for _ in range(FLAGS.batchSize):
+    batch['feature'].append(gcn_features_val[i])
+    batch['support'].append(supports_val[i])
+    batch['y'].append(y_val[i, :].reshape(-1, 1))
+    batch['continuous_features'].append(continuous_features_val[i].reshape(1, -1))
+    for name in FEATURE_NAME['discrete']:
+        batch[name].append(discrete_features_val[name][i].reshape(1, -1))
+        # i += 1
+    i += 1
+    feed_dict = my_construct_feed_dict(batch['feature'], batch['support'], batch['y'],
+                                       batch['continuous_features'], batch, FEATURE_NAME['discrete'],
+                                       placeholders)
+    feed_dict.update({placeholders['dropout']: FLAGS.dropout})
 
-    print("Epoch:", '%04d' % (epoch + 1), "train_loss=", "{:.5f}".format(loss_train),
-          "train_acc=", "{:.5f}".format(accu_train), "val_loss=", "{:.5f}".format(loss_val),
-          "val_acc=", "{:.5f}".format(accu_val), "time=", "{:.5f}".format(time.time() - t))
+    outs = sess.run([model.loss, model.accuracy], feed_dict=feed_dict)
+    # print(sess.run(model.labels, feed_dict=feed_dict))
+    loss.append(outs[0])
+    accu.append(outs[1])
+    # print(outs)
+loss_val = np.mean(loss)
+accu_val = np.mean(accu)
 
-    random.shuffle(list_for_shuffle)                        # 每个epoch结束后，shuffle
+print("val_loss=", "{:.5f}".format(loss_val), "val_acc=", "{:.5f}".format(accu_val))
 
-    if epoch>FLAGS.early_stopping_begin and val_record[-1]>np.mean(val_record[-(FLAGS.early_stopping+1):-1]):
-        print('Early stopping...')
+
+loss = []
+accu = []
+i = 0
+# test
+while i < len(gcn_features_test):
+    batch = {'feature': [],
+             'support': [],
+             'y': [],
+             'continuous_features': []}
+    for name in FEATURE_NAME['discrete']:
+        batch[name] = []
+    if len(gcn_features_test) - i < FLAGS.batchSize:
         break
-    else:
-        if os.path.exists(FLAGS.savepath):
-            for file in os.listdir(FLAGS.savepath):
-                file_path = os.path.join(FLAGS.savepath, file)
-                os.remove(file_path)
-        model.save(sess, FLAGS.savepath + '/mmgcn.ckpt')
+    # for _ in range(FLAGS.batchSize):
+    batch['feature'].append(gcn_features_test[i])
+    batch['support'].append(supports_test[i])
+    batch['y'].append(y_test[i, :].reshape(-1, 1))
+    batch['continuous_features'].append(continuous_features_test[i].reshape(1, -1))
+    for name in FEATURE_NAME['discrete']:
+        batch[name].append(discrete_features_test[name][i].reshape(1, -1))
+        # i += 1
+    i += 1
+    feed_dict = my_construct_feed_dict(batch['feature'], batch['support'], batch['y'],
+                                       batch['continuous_features'], batch, FEATURE_NAME['discrete'],
+                                       placeholders)
+    feed_dict.update({placeholders['dropout']: FLAGS.dropout})
 
-print("Save to path:", model.save_path)
-print("Time = %.5f" % (time.time() - start))
+    outs = sess.run([model.loss, model.accuracy], feed_dict=feed_dict)
+    # print(sess.run(model.labels, feed_dict=feed_dict))
+    loss.append(outs[0])
+    accu.append(outs[1])
+    # print(outs)
+loss_test = np.mean(loss)
+accu_test = np.mean(accu)
 
+print("test_loss=", "{:.5f}".format(loss_test), "test_acc=", "{:.5f}".format(accu_test))

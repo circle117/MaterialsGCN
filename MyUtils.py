@@ -123,7 +123,7 @@ def test_split_gcn(supports, features, y, test_ratio):
     return supports[test_num:], features[test_num:], y[test_num:, :]
 
 
-def train_val_split_mlp(discrete_features, continuous_features, val_ratio, test_ratio):
+def train_val_split_mmgcn(discrete_features, continuous_features, val_ratio, test_ratio):
     val_num = int(continuous_features.shape[0]*(1-val_ratio-test_ratio))
     test_num = int(continuous_features.shape[0]*(1-test_ratio))
     discrete_features_train = {}
@@ -133,6 +133,14 @@ def train_val_split_mlp(discrete_features, continuous_features, val_ratio, test_
         discrete_features_val[key] = value[val_num:test_num]
     return discrete_features_train, discrete_features_val, \
         continuous_features[:val_num], continuous_features[val_num:test_num]
+
+
+def test_split_mmgcn(discrete_features, continuous_features, test_ratio):
+    test_num = int(continuous_features.shape[0]*(1-test_ratio))
+    discrete_features_test = {}
+    for key, value in discrete_features.items():
+        discrete_features_test[key] = value[test_num:]
+    return discrete_features_test, continuous_features[test_num:]
 
 
 def my_construct_feed_dict(gcn_feature, support, y, con_feature, batch, D_feature_name, placeholders):

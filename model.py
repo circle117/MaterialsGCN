@@ -278,11 +278,12 @@ class MMGCN(Model):
                  batch_momentum,
                  virtual_batch_size,
                  epsilon,
+                 is_training,
                  **kwargs):
         super(MMGCN, self).__init__(**kwargs)
 
         self.batch_size = len(placeholders['features'])
-        self.is_training = True
+        self.is_training = is_training
 
         # 输入特征
         self.gcn_inputs = placeholders['features']                              # GCN特征
@@ -402,7 +403,7 @@ class MMGCN(Model):
                                   placeholders=self.placeholders,
                                   act=lambda x: x,
                                   dropout=False,
-                                  bias=False,
+                                  bias=True,
                                   logging=self.logging)
 
     def _build_tabnet(self, data, is_training):
@@ -570,14 +571,20 @@ class MMGCN(Model):
         """
         self.tabnet_inputs = []
         for name, dim in self.d_feature_dim:
-            self.tabnet_inputs.append(self.embedding_layers[name](self.tabnet_inputs_d[name], 0))
-        self.tabnet_inputs.append(self.tabnet_inputs_c)
+            if self.batch_size == 1:
+                temp = tf.reshape(self.tabnet_inputs_d[name][0, :], [1, -1])
+                self.tabnet_inputs.append(self.embedding_layers[name](temp, 0))
+            elif self.batch_size == FLAGS.batchSize:
+                self.tabnet_inputs.append(self.embedding_layers[name](self.tabnet_inputs_d[name], 0))
+        # self.tabnet_inputs.append(self.tabnet_inputs_c)
         if self.batch_size == 1:
-            self.tabnet_inputs = tf.concat([self.tabnet_inputs[0]], axis=1)
-            self.is_training = False
-        else:
-            self.tabnet_inputs = tf.concat(self.tabnet_inputs, axis=1)
-            self.is_training = True
+            temp = tf.reshape(self.tabnet_inputs_c[0, :], [1, -1])
+            self.tabnet_inputs.append(temp)
+            temp = tf.reshape(self.labels[0, :], [self.batch_size, 1])
+            self.labels = temp
+        elif self.batch_size == FLAGS.batchSize:
+            self.tabnet_inputs.append(self.tabnet_inputs_c)
+        self.tabnet_inputs = tf.concat(self.tabnet_inputs, axis=1)
         # self.tabnet_inputs = tf.concat(self.tabnet_inputs, axis=1)
 
         """
@@ -592,7 +599,6 @@ class MMGCN(Model):
         else:
             self.fusion_inputs = tf.concat([self.gcn_output, self.tabnet_output], axis=1)
             self.outputs = self.dense_layer(self.fusion_inputs, 0)
-            self.temp = self.gcn_output
 
         # Store model variables for easy access
         variables_gcn = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope='gcn')
@@ -608,8 +614,10 @@ class MMGCN(Model):
         if FLAGS.gcn_train:
             self.opt_op = self.optimizer.minimize(self.loss)
         else:
-            grads_and_vars = self.optimizer.compute_gradients(self.accuracy, variables_tabnet)
-            self.opt_op = self.optimizer.apply_gradients(grads_and_vars)
+            update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
+            with tf.control_dependencies(update_ops):
+                grads_and_vars = self.optimizer.compute_gradients(self.accuracy, variables_tabnet)
+                self.opt_op = self.optimizer.apply_gradients(grads_and_vars)
 
     def predict(self, output):
         return tf.nn.softplus(output)
