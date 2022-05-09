@@ -1,7 +1,7 @@
 import tensorflow._api.v2.compat.v1 as tf
 from MyUtils import *
 from utils import *
-from model import GCN, MLP, MMGCN
+from model import GCN, MMGCN
 
 import time
 import random
@@ -16,8 +16,8 @@ FEATURE_GCN_LIST = ['*', 'C', 'N', 'O', 'F', 'S', 'Si',         # 原子类别
                     'A0', 'A1',                                 # 芳香性
                     'R0', 'R1']                                 # 是否在环上
 
-FEATURE_NAME = {'discrete': ['Solvent', 'method2'],
-                'continuous': ['temperature1', 'time1', 'minTemp', 'maxTemp', 'time2']}
+FEATURE_NAME = {'discrete': ['Solvent', 'method2', 'temperature1'],
+                'continuous': ['time1', 'minTemp', 'maxTemp', 'time2']}
 
 # Set random seed
 seed = 123
@@ -31,33 +31,33 @@ Settings
 flags = tf.app.flags
 FLAGS = flags.FLAGS
 # path
-flags.DEFINE_string('dataset', './dataset/dataMethod2Deleted.csv', 'Dataset string.')
-flags.DEFINE_string('savepath', './myMMGCN/MMGCN_6', 'Save path sting')
-flags.DEFINE_string('store_path', './myMMGCN/MMGCN_5/mmgcn.ckpt', 'Store path string')
+flags.DEFINE_string('dataset', './dataset/dataForMMGCN.csv', 'Dataset string.')
+flags.DEFINE_string('savepath', './myMMGCN/MMGCN_5', 'Save path sting')
+flags.DEFINE_string('store_path', './myMMGCN/MMGCN_4/mmgcn.ckpt', 'Store path string')
 flags.DEFINE_float('val_ratio', 0.1, 'Ratio of validation dataset')
 flags.DEFINE_float('test_ratio', 0.1, 'Ratio of validation dataset')
 # Model
-flags.DEFINE_string('model', 'mmgcn', 'Model string.')      # 'gcn', 'mmgen
-flags.DEFINE_float('learning_rate', 0.01, 'Initial learning rate.')
+flags.DEFINE_string('model', 'mmgcn', 'Model string.')                      # 'gcn', 'mmgen
+flags.DEFINE_float('learning_rate', 0.001, 'Initial learning rate.')
 flags.DEFINE_integer('epochs', 200, 'Number of epochs to train.')
 flags.DEFINE_float('dropout', 0.3, 'Dropout rate (1 - keep probability).')
 flags.DEFINE_float('weight_decay', 5e-2, 'Weight for L2 loss on embedding matrix.')
-flags.DEFINE_integer('early_stopping_begin', 10, 'Tolerance for early stopping')
+flags.DEFINE_integer('early_stopping_begin', 20, 'Tolerance for early stopping')
 flags.DEFINE_integer('early_stopping', 10, 'Tolerance for early stopping (# of epochs).')
 flags.DEFINE_integer('batchSize', 32, 'Number of batch size')
-flags.DEFINE_boolean('gcn_train', False, 'train GCN or MMGCN')
+flags.DEFINE_string('train_model', 'TabNet', 'the model to train')              # GCN, TabNet, All
 # GCN
 flags.DEFINE_integer('gcn_hidden', 64, 'Number of units in GCN hidden layer .')
 flags.DEFINE_integer('num_graphs', 5, 'Number of units in hidden layer 3.')
 flags.DEFINE_integer('max_degree', 2, 'Maximum Chebyshev polynomial degree.')
-flags.DEFINE_integer('gcn_dense', 1, 'If do gcn dense')
+flags.DEFINE_integer('gcn_dense', 16, 'If do gcn dense')
 # Embedding
 flags.DEFINE_integer('embed_dim', 1, 'Number of units in Embedding layer')
 # TabNet
-flags.DEFINE_integer('feature_dim', 8, 'hidden representation in feature transformation block')
-flags.DEFINE_integer('output_dim', 4, 'output dimension of every decision step')
+flags.DEFINE_integer('feature_dim', 16, 'hidden representation in feature transformation block')
+flags.DEFINE_integer('output_dim', 8, 'output dimension of every decision step')
 flags.DEFINE_integer('num_decision_steps', 4, 'Number of decision step')
-flags.DEFINE_float('relaxation_factor', 1.5, 'Number of feature usage')
+flags.DEFINE_float('relaxation_factor', 3, 'Number of feature usage')
 
 
 """
@@ -90,12 +90,6 @@ elif FLAGS.model == 'gcn_cheby':
         supports.append(chebyshev_polynomials(adj, FLAGS.max_degree))
     num_supports = 1 + FLAGS.max_degree
     model_func = GCN
-elif FLAGS.model == 'dense':
-    supports = []
-    for adj in adjs:
-        supports.append([preprocess_adj(adj)])  # Not used
-    num_supports = 1
-    model_func = MLP
 elif FLAGS.model == 'mmgcn':
     supports = []
     print("Calculating Chebyshev polynomials up to order {}...".format(FLAGS.max_degree))
@@ -122,6 +116,8 @@ supports_train, gcn_features_train, y_train, supports_val, features_val, y_val =
 discrete_features_train, discrete_features_val, continuous_features_train, continuous_features_val = \
     train_val_split_mmgcn(discrete_features, continuous_features, FLAGS.val_ratio, FLAGS.test_ratio)
 list_for_shuffle = list(range(len(supports_train)))
+list_for_shuffle_val = list(range(len(supports_val)))
+
 
 """
 Define placeholders
@@ -177,10 +173,12 @@ model = model_func(placeholders,
                    logging=True)
 
 
-def evaluate(features, supports, y, con_features, dis_features, placeholders):
+def evaluate(features, supports, y, con_features, dis_features, placeholders, list_for_shuffle):
     loss = []
     accu = []
-    for i in range(len(features)):
+    i = 0
+    index = 0
+    while i < len(list_for_shuffle):
         batch = {'feature': [],
                  'support': [],
                  'y': [],
@@ -188,12 +186,23 @@ def evaluate(features, supports, y, con_features, dis_features, placeholders):
         for name in FEATURE_NAME['discrete']:
             batch[name] = []
         for _ in range(FLAGS.batchSize):
-            batch['feature'].append(features[i])
-            batch['support'].append(supports[i])
-            batch['y'].append(y[i, :].reshape(-1, 1))
-            batch['continuous_features'].append(con_features[i].reshape(1, -1))
-            for name in FEATURE_NAME['discrete']:
-                batch[name].append(dis_features[name][i].reshape(1, -1))
+            if i == len(list_for_shuffle):
+                batch['feature'].append(features[list_for_shuffle[index]])
+                batch['support'].append(supports[list_for_shuffle[index]])
+                batch['y'].append(y[list_for_shuffle[index], :].reshape(-1, 1))
+                batch['continuous_features'].append(con_features[list_for_shuffle[index]].reshape(1, -1))
+                for name in FEATURE_NAME['discrete']:
+                    batch[name].append(dis_features[name][list_for_shuffle[index]].reshape(1, -1))
+                index += 1
+            else:
+                batch['feature'].append(features[list_for_shuffle[i]])
+                batch['support'].append(supports[list_for_shuffle[i]])
+                batch['y'].append(y[list_for_shuffle[i], :].reshape(-1, 1))
+                batch['continuous_features'].append(con_features[list_for_shuffle[i]].reshape(1, -1))
+                for name in FEATURE_NAME['discrete']:
+                    batch[name].append(dis_features[name][list_for_shuffle[i]].reshape(1, -1))
+                i += 1
+
         feed_dict_val = my_construct_feed_dict(batch['feature'],
                                                batch['support'], batch['y'],
                                                batch['continuous_features'], batch,
@@ -208,7 +217,7 @@ def evaluate(features, supports, y, con_features, dis_features, placeholders):
 Train
 """
 sess = tf.Session()
-if FLAGS.gcn_train:
+if FLAGS.train_model == 'GCN':
     sess.run(tf.global_variables_initializer())
 else:
     sess.run(tf.global_variables_initializer())
@@ -222,7 +231,6 @@ for epoch in range(FLAGS.epochs):
     loss = []
     accu = []
     i = 0
-    model.batch_size = FLAGS.batchSize
     while i < len(list_for_shuffle):
         batch = {'feature': [],
                  'support': [],
@@ -248,7 +256,6 @@ for epoch in range(FLAGS.epochs):
             feed_dict.update({placeholders['dropout']: FLAGS.dropout})
 
         outs = sess.run([model.opt_op, model.loss, model.accuracy], feed_dict=feed_dict)
-        # print(sess.run(model.outputs, feed_dict=feed_dict))
         loss.append(outs[1])
         accu.append(outs[2])
     loss_train = np.mean(loss)
@@ -257,7 +264,7 @@ for epoch in range(FLAGS.epochs):
     # val
     loss_val, accu_val = evaluate(features_val, supports_val, y_val,
                                   continuous_features_val, discrete_features_val,
-                                  placeholders)
+                                  placeholders, list_for_shuffle_val)
     val_record.append(accu_val)
 
     print("Epoch:", '%04d' % (epoch + 1), "train_loss=", "{:.5f}".format(loss_train),
@@ -265,8 +272,10 @@ for epoch in range(FLAGS.epochs):
           "val_acc=", "{:.5f}".format(accu_val), "time=", "{:.5f}".format(time.time() - t))
 
     random.shuffle(list_for_shuffle)                        # 每个epoch结束后，shuffle
+    random.shuffle(list_for_shuffle_val)
 
-    if epoch>FLAGS.early_stopping_begin and val_record[-1]>np.mean(val_record[-(FLAGS.early_stopping+1):-1]):
+    if epoch > FLAGS.early_stopping_begin and \
+            val_record[-1] > np.mean(val_record[-(FLAGS.early_stopping+1):-1]):
         print('Early stopping...')
         break
     else:
