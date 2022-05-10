@@ -8,7 +8,7 @@ import scipy.sparse as sp
 from scipy.sparse.linalg import eigsh
 
 
-def load_data_gcn(dataset, feature_map):
+def load_data_gcn(dataset, feature_map, max_atoms):
     """
     :param dataset: 数据集路径
     :param feature_map: one-hot特征映射
@@ -22,28 +22,36 @@ def load_data_gcn(dataset, feature_map):
     y = np.array(df['Tg']).reshape(-1, 1)
 
     # adj for batchsize=1, [max x max, ...]
-    adjs = []
-    max_atom_num = 0
+    adjs = []                                                       # 下标i，对应df第i行数据
     for i in range(df.shape[0]):
         adj_dict = {}
         mol = Chem.MolFromSmiles(df.loc[i, 'SMILES'])
         atoms = mol.GetAtoms()
-        if len(atoms) > max_atom_num:
-            max_atom_num = len(atoms)
         for atom in atoms:
-            adj_dict[atom.GetIdx()] = []
-            for neighbor in atom.GetNeighbors():
-                adj_dict[atom.GetIdx()].append(neighbor.GetIdx())
+            if len(atoms) <= max_atoms:
+                adj_dict[atom.GetIdx()] = []
+                for neighbor in atom.GetNeighbors():
+                    adj_dict[atom.GetIdx()].append(neighbor.GetIdx())
+            else:
+                begin = int((len(atoms)-max_atoms)/2)               # [begin, end]
+                end = begin+max_atoms-1
+                if begin <= atom.GetIdx() <= end:                     # 节点与其邻节点均在范围内
+                    adj_dict[atom.GetIdx()-begin] = []
+                    for neighbor in atom.GetNeighbors():
+                        if begin <= neighbor.GetIdx() <= end:
+                            adj_dict[atom.GetIdx()-begin].append(neighbor.GetIdx()-begin)
         adjs.append(nx.adjacency_matrix(nx.from_dict_of_lists(adj_dict)))
 
     # zero_padding至相同大小
-    print('最大原子数：%d，邻接矩阵zero_padding...' % max_atom_num)
+    print('最大原子数：%d，邻接矩阵zero_padding...' % max_atoms)
     for i in tqdm(range(len(adjs))):
-        width = max_atom_num - adjs[i].shape[0]
-        if width % 2 == 0:
+        mol = Chem.MolFromSmiles(df.loc[i, 'SMILES'])
+        atoms = mol.GetAtoms()
+        width = max_atoms - len(atoms)
+        if width > 0 and width % 2 == 0:
             width = int(width/2)
             adjs[i] = sp.csr_matrix(np.pad(adjs[i].todense(), ((width, width), (width, width)), 'constant'))
-        else:
+        elif width > 0:
             width = int(width/2)
             adjs[i] = sp.csr_matrix(np.pad(adjs[i].todense(), ((width, width+1), (width, width+1)), 'constant'))
 
@@ -51,29 +59,38 @@ def load_data_gcn(dataset, feature_map):
     features = []
     for i in tqdm(range(df.shape[0])):
         mol = Chem.MolFromSmiles(df.loc[i, 'SMILES'])
-        feature = np.zeros((max_atom_num, len(feature_map)))
-        width = int((max_atom_num - len(mol.GetAtoms()))/2)
+        feature = np.zeros((max_atoms, len(feature_map)))
+        if max_atoms >= len(mol.GetAtoms()):
+            width = int((max_atoms - len(mol.GetAtoms()))/2)
+            begin = 0
+            end = len(mol.GetAtoms())-1
+        else:
+            begin = int((len(mol.GetAtoms())-max_atoms)/2)
+            end = begin+max_atoms-1
+            width = -begin
         for atom in mol.GetAtoms():
-            res = atom.GetSymbol()                      # 原子类别
-            feature[atom.GetIdx()+width, feature_map[res]] = 1
+            if width > 0 or begin <= atom.GetIdx() <= end:
+                res = atom.GetSymbol()                      # 原子类别
+                feature[atom.GetIdx()+width, feature_map[res]] = 1
 
-            res = atom.GetTotalNumHs()                  # 连接H原子数
-            feature[atom.GetIdx()+width, feature_map['H%d' % res]] = 1
+                res = atom.GetTotalNumHs()                  # 连接H原子数
+                feature[atom.GetIdx()+width, feature_map['H%d' % res]] = 1
 
-            res = atom.GetDegree()                      # Degree
-            feature[atom.GetIdx()+width, feature_map['D%d' % res]] = 1
+                res = atom.GetDegree()                      # Degree
+                feature[atom.GetIdx()+width, feature_map['D%d' % res]] = 1
 
-            res = atom.GetIsAromatic()                  # 芳香性
-            feature[atom.GetIdx()+width, feature_map['A%d' % res]] = 1
+                res = atom.GetIsAromatic()                  # 芳香性
+                feature[atom.GetIdx()+width, feature_map['A%d' % res]] = 1
 
-            res = atom.IsInRing()                       # 是否在环上
-            feature[atom.GetIdx()+width, feature_map['R%d' % res]] = 1
+                res = atom.IsInRing()                       # 是否在环上
+                feature[atom.GetIdx()+width, feature_map['R%d' % res]] = 1
         features.append(sp.csr_matrix(feature))
     return adjs, features, y
 
 
 def encode_one_hot(df, feature):
-    feature_list = list(set(df[feature].values))
+    df_all = pd.read_csv('./dataset/dataForMMGCN.csv')
+    feature_list = list(set(df_all[feature].values))
 
     arr = np.eye(len(feature_list))
     feature_index = {}
