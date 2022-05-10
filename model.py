@@ -1,5 +1,3 @@
-import platform
-
 from layers import *
 from metrics import *
 import tensorflow_addons as tfa
@@ -29,7 +27,6 @@ class Model(object):
         self.vars = {}
         self.placeholders = {}
 
-        self.layers = []
         self.activations = []
 
         self.inputs = None
@@ -110,6 +107,8 @@ class GCN(Model):
         self.placeholders = placeholders
         self.labels = tf.concat(placeholders['labels'], 0)
 
+        self.layers = []
+
         self.features = None
 
         self.optimizer = tf.train.AdamOptimizer(learning_rate=FLAGS.learning_rate, use_locking=True)
@@ -145,35 +144,29 @@ class GCN(Model):
                                                 dropout=False,
                                                 logging=self.logging))
 
-        if FLAGS.dense:
-            self.layers.append(Dense1(input_dim=FLAGS.hidden3,
-                                      output_dim=self.output_dim,
-                                      placeholders=self.placeholders,
-                                      act=tf.nn.relu,
-                                      dropout=True,
-                                      bias=True))
+        self.layers.append(Dense1(input_dim=FLAGS.hidden,
+                                  output_dim=self.output_dim,
+                                  placeholders=self.placeholders,
+                                  act=tf.nn.relu,
+                                  dropout=True,
+                                  bias=True,
+                                  logging=self.logging))
 
-            self.layers.append(Dense2(input_dim=self.output_dim,
-                                      output_dim=self.num_nodes,
-                                      placeholders=self.placeholders,
-                                      act=lambda x: x,
-                                      bias=True))
-        else:
-            self.layers.append(Dense1(input_dim=FLAGS.hidden,
-                                      output_dim=self.output_dim,
-                                      placeholders=self.placeholders,
-                                      act=tf.nn.relu,
-                                      dropout=True,
-                                      bias=True,
-                                      logging=self.logging))
+        self.layers.append(Dense1(input_dim=self.num_nodes,
+                                  output_dim=FLAGS.num_dense,
+                                  placeholders=self.placeholders,
+                                  act=tf.nn.relu,
+                                  dropout=True,
+                                  bias=True,
+                                  logging=self.logging))
 
-            self.layers.append(Dense2(input_dim=self.output_dim,
-                                      output_dim=self.num_nodes,
-                                      placeholders=self.placeholders,
-                                      act=lambda x: x,
-                                      dropout=True,
-                                      bias=True,
-                                      logging=self.logging))
+        self.layers.append(Dense1(input_dim=FLAGS.num_dense,
+                                  output_dim=self.output_dim,
+                                  placeholders=self.placeholders,
+                                  act=tf.nn.softplus,
+                                  dropout=False,
+                                  bias=True,
+                                  logging=self.logging))
 
     def build(self):
         with tf.variable_scope(self.name):
@@ -183,12 +176,12 @@ class GCN(Model):
         for i in range(FLAGS.batchSize):
             self.activations = [self.inputs[i]]
             self.GCN_outputs = []
-            for layer in self.layers:
+            for layer in self.layers[:-2]:
                 hidden = layer(self.activations[-1], i)
                 self.activations.append(hidden)
-                if (not FLAGS.dense) and len(self.GCN_outputs) < self.num_graphs:
+                if len(self.GCN_outputs) < self.num_graphs:
                     self.GCN_outputs.append(hidden)
-                if (not FLAGS.dense) and len(self.activations)-1 == self.num_graphs:
+                if len(self.activations)-1 == self.num_graphs:
                     GCN_outputs = tf.stack(self.GCN_outputs, axis=1)
                     GCN_outputs = tf.reshape(GCN_outputs, [1, self.num_graphs, self.num_nodes, FLAGS.hidden])
                     hidden = tf.nn.max_pool(GCN_outputs,
@@ -198,9 +191,12 @@ class GCN(Model):
                     hidden = tf.reshape(hidden, [self.num_nodes, FLAGS.hidden])
                     self.features = hidden
                     self.activations.append(hidden)
-            self.outputs.append(self.predict(self.activations[-1]))
+            self.outputs.append(tf.reshape(self.activations[-1], [1, self.num_nodes]))
 
         self.outputs = tf.concat(self.outputs, axis=0)
+
+        for layer in self.layers[-2:]:
+            self.outputs = layer(self.outputs, 0)
 
         # Store model variables for easy access
         variables = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope=self.name)
