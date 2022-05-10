@@ -1,7 +1,7 @@
 import tensorflow._api.v2.compat.v1 as tf
 from MyUtils import *
 from utils import *
-from model import GCN, MLP
+from model import GCN
 
 import os
 import time
@@ -9,7 +9,7 @@ import random
 
 tf.disable_v2_behavior()
 
-FEATURE_LIST = ['*', 'C', 'N', 'O', 'F', 'S', 'Si',         # 原子类别
+FEATURE_LIST = ['*', 'C', 'N', 'O', 'F', 'S', 'Si', 'P',    # 原子类别
                 'H0', 'H1', 'H2', 'H3',                     # 连接H数量
                 'D1', 'D2', 'D3', 'D4',                     # Degree
                 'A0', 'A1',                                 # 芳香性
@@ -26,8 +26,8 @@ Setting
 flags = tf.app.flags
 FLAGS = flags.FLAGS
 # path
-flags.DEFINE_string('dataset', './dataset/dataMethod2Deleted.csv', 'Dataset string.')
-flags.DEFINE_string('savepath', "./myGCN/tmp", 'Save path string')
+flags.DEFINE_string('dataset', './dataset/dataForGCN.csv', 'Dataset string.')
+flags.DEFINE_string('savepath', "./myGCN/GCN_4、、·       `", 'Save path string')
 # val test ratio
 flags.DEFINE_float('val_ratio', 0.1, 'Ratio of validation dataset')
 flags.DEFINE_float('test_ratio', 0.1, 'Ratio of test dataset')
@@ -36,14 +36,15 @@ flags.DEFINE_string('model', 'gcn_cheby', 'Model string.')
 flags.DEFINE_float('learning_rate', 0.01, 'Initial learning rate.')
 flags.DEFINE_integer('epochs', 200, 'Number of epochs to train.')
 flags.DEFINE_integer('batchSize', 16, 'Number of batches to train')
-flags.DEFINE_boolean('dense', False, 'dense or pooling')
 flags.DEFINE_integer('hidden', 64, 'Number of units in hidden layer 1.')
-flags.DEFINE_integer('num_graphs', 5, 'Number of units in hidden layer 3.')
+flags.DEFINE_integer('num_graphs', 5, 'Number of graphs')
+flags.DEFINE_integer('num_dense', 32, 'Number of units in dense layer')
+flags.DEFINE_integer('max_atoms', 110, 'Number of atoms')
 flags.DEFINE_float('dropout', 0.3, 'Dropout rate (1 - keep probability).')
 flags.DEFINE_float('weight_decay', 5e-2, 'Weight for L2 loss on embedding matrix.')
-flags.DEFINE_integer('early_stopping', 20, 'Tolerance for early stopping (# of epochs).')
+flags.DEFINE_integer('early_stopping_begin', 30, 'Tolerance for early stopping (# of epochs).')
+flags.DEFINE_integer('early_stopping', 10, 'Tolerance for early stopping (# of epochs).')
 flags.DEFINE_integer('max_degree', 2, 'Maximum Chebyshev polynomial degree.')
-
 
 """
 load data
@@ -51,7 +52,7 @@ load data
 feature_map = {}                                # for embedding
 for idx, feature in enumerate(FEATURE_LIST):
     feature_map[feature] = idx
-adjs, features, y = load_data_gcn(FLAGS.dataset, feature_map)
+adjs, features, y = load_data_gcn(FLAGS.dataset, feature_map, FLAGS.max_atoms)
 print('数据集大小：%d，特征矩阵大小：(%d, %d)' % (len(adjs), features[0].shape[0], features[0].shape[1]))
 
 
@@ -72,12 +73,6 @@ elif FLAGS.model == 'gcn_cheby':
         supports.append(chebyshev_polynomials(adj, FLAGS.max_degree))
     num_supports = 1 + FLAGS.max_degree
     model_func = GCN
-elif FLAGS.model == 'dense':
-    supports = []
-    for adj in adjs:
-        supports.append([preprocess_adj(adj)])  # Not used
-    num_supports = 1
-    model_func = MLP
 else:
     raise ValueError('Invalid argument for model: ' + str(FLAGS.model))
 
@@ -90,6 +85,7 @@ supports_train, features_train, y_train, supports_val, features_val, y_val = tra
                                                                                                   FLAGS.test_ratio)
 list_for_shuffle = list(range(len(supports_train)))
 list_for_shuffle_val = list(range(len(supports_val)))
+print("training dataset: %d, validation dataset: %d" % (len(list_for_shuffle), len(list_for_shuffle_val)))
 
 
 """
@@ -185,6 +181,7 @@ for epoch in range(FLAGS.epochs):
         feed_dict.update({placeholders['dropout']: FLAGS.dropout})
 
         outs = sess.run([model.opt_op, model.loss, model.accuracy], feed_dict=feed_dict)
+        # print(outs[1], outs[2])
         loss.append(outs[1])
         accu.append(outs[2])
     loss_train = np.mean(loss)
@@ -202,7 +199,7 @@ for epoch in range(FLAGS.epochs):
     random.shuffle(list_for_shuffle_val)
 
     # early stop
-    if epoch > FLAGS.early_stopping and val_record[-1] > np.mean(val_record[-(FLAGS.early_stopping+1):-1]):
+    if epoch > FLAGS.early_stopping_begin and val_record[-1] > np.mean(val_record[-(FLAGS.early_stopping+1):-1]):
         print('Early stopping...')
         break
     else:
