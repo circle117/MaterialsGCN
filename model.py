@@ -44,27 +44,27 @@ class Model(object):
     def _build(self):
         raise NotImplementedError
 
-    # def build(self):
-    #     """ Wrapper for _build() """
-    #     with tf.variable_scope(self.name):
-    #         self._build()
-    #
-    #     # Build sequential layer model
-    #     self.activations.append(self.inputs)
-    #     for layer in self.layers:
-    #         hidden = layer(self.activations[-1])
-    #         self.activations.append(hidden)
-    #     self.outputs = self.activations[-1]
-    #
-    #     # Store model variables for easy access
-    #     variables = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope=self.name)
-    #     self.vars = {var.name: var for var in variables}
-    #
-    #     # Build metrics
-    #     self._loss()
-    #     self._accuracy()
-    #
-    #     self.opt_op = self.optimizer.minimize(self.loss)
+    def build(self):
+        """ Wrapper for _build() """
+        with tf.variable_scope(self.name):
+            self._build()
+
+        # Build sequential layer model
+        self.activations.append(self.inputs)
+        for layer in self.layers:
+            hidden = layer(self.activations[-1])
+            self.activations.append(hidden)
+        self.outputs = self.activations[-1]
+
+        # Store model variables for easy access
+        variables = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope=self.name)
+        self.vars = {var.name: var for var in variables}
+
+        # Build metrics
+        self._loss()
+        self._accuracy()
+
+        self.opt_op = self.optimizer.minimize(self.loss)
 
     def predict(self, output):
         pass
@@ -102,10 +102,10 @@ class GCN(Model):
         self.num_nodes = num_nodes                                              # 节点数
         self.num_graphs = num_graphs                                            # GCN层数
         self.GCN_outputs = []
-        # self.input_dim = self.inputs.get_shape().as_list()[1]  # To be supported in future Tensorflow versions
         self.output_dim = placeholders['labels'][0].get_shape().as_list()[1]       # 分类数
         self.placeholders = placeholders
         self.labels = tf.concat(placeholders['labels'], 0)
+        self.temp = placeholders['labels'][0]
 
         self.layers = []
 
@@ -134,14 +134,20 @@ class GCN(Model):
                                             act=tf.nn.relu,
                                             dropout=False,
                                             sparse_inputs=True,
+                                            is_edge_feature=False,
                                             logging=self.logging))
 
         for i in range(self.num_graphs-1):
+            if i % 2 == 1:
+                is_edge_feature = True
+            else:
+                is_edge_feature = False
             self.layers.append(GraphConvolution(input_dim=FLAGS.hidden,
                                                 output_dim=FLAGS.hidden,
                                                 placeholders=self.placeholders,
                                                 act=tf.nn.relu,
-                                                dropout=False,
+                                                dropout=True,
+                                                is_edge_feature=True,
                                                 logging=self.logging))
 
         self.layers.append(Dense1(input_dim=FLAGS.hidden,
@@ -178,6 +184,10 @@ class GCN(Model):
             self.GCN_outputs = []
             for layer in self.layers[:-2]:
                 hidden = layer(self.activations[-1], i)
+                try:
+                    self.temp = layer.temp
+                except Exception:
+                    pass
                 self.activations.append(hidden)
                 if len(self.GCN_outputs) < self.num_graphs:
                     self.GCN_outputs.append(hidden)

@@ -198,7 +198,7 @@ class Embedding(Layer):
 class GraphConvolution(Layer):
     """Graph convolution layer."""
     def __init__(self, input_dim, output_dim, placeholders, dropout=0.,
-                 sparse_inputs=False, act=tf.nn.relu, bias=False,
+                 sparse_inputs=False, is_edge_feature=False, act=tf.nn.relu, bias=False,
                  featureless=False, **kwargs):
         super(GraphConvolution, self).__init__(**kwargs)
 
@@ -212,10 +212,13 @@ class GraphConvolution(Layer):
         self.act = act
         self.support = placeholders['support'][0]
         self.sparse_inputs = sparse_inputs
+        self.is_edge_feature = is_edge_feature
         self.featureless = featureless
         self.bias = bias
         self.input_dim = input_dim
         self.output_dim = output_dim
+        self.num_nodes = placeholders['features'][0].get_shape().as_list()[0]
+        self.edge_dim = placeholders['edge_features'][0].get_shape().as_list()[3]
 
         # helper variable for sparse dropout
         self.num_features_nonzero = placeholders['num_features_nonzero']
@@ -227,6 +230,12 @@ class GraphConvolution(Layer):
                                                         name='weights_' + str(i))
             if self.bias:
                 self.vars['bias'] = zeros([output_dim], name='bias')
+            if self.is_edge_feature:
+                self.vars['weight_edge'] = glorot([self.num_nodes, self.num_nodes*self.edge_dim],
+                                                  name='weight_edge')
+                self.vars['weight_edge'] = tf.reshape(self.vars['weight_edge'],
+                                                      [self.num_nodes, self.num_nodes, self.edge_dim, 1])
+                self.vars['bias_edge'] = zeros([self.num_nodes, self.num_nodes], name='bias_edge')
 
         if self.logging:
             self._log_vars()
@@ -235,6 +244,7 @@ class GraphConvolution(Layer):
         x = inputs
 
         self.support = self.placeholders['support'][index]
+        self.edge_feature = self.placeholders['edge_features'][index]
 
         # dropout
         if self.sparse_inputs:
@@ -251,7 +261,16 @@ class GraphConvolution(Layer):
                               sparse=self.sparse_inputs)
             else:
                 pre_sup = self.vars['weights_' + str(i)]
-            support = dot(self.support[i], pre_sup, sparse=True)
+            if self.is_edge_feature and i == 1:
+                edge = dot(self.edge_feature, self.vars['weight_edge'], sparse=False)
+                edge = tf.reshape(edge, [self.num_nodes, self.num_nodes]) + self.vars['bias_edge']
+                edge = tf.nn.sigmoid(edge)
+                support_dense = tf.sparse_tensor_to_dense(self.support[i])
+                support = tf.multiply(edge, support_dense)
+                support = dot(support, pre_sup, sparse=False)
+                self.temp = support
+            else:
+                support = dot(self.support[i], pre_sup, sparse=True)
             supports.append(support)
         output = tf.add_n(supports)
 
