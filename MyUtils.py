@@ -8,7 +8,37 @@ import scipy.sparse as sp
 from scipy.sparse.linalg import eigsh
 
 
-def load_data_gcn(dataset, feature_map, max_atoms):
+def normalize_adj(adj):
+    """Symmetrically normalize adjacency matrix."""
+    adj = sp.coo_matrix(adj)                        # 格式转换
+    rowsum = np.array(adj.sum(1))                   # 计算行方向上的和（度）
+    d_inv_sqrt = np.power(rowsum, -0.5).flatten()   # D^-0.5
+    d_inv_sqrt[np.isinf(d_inv_sqrt)] = 0.           # 无穷处改为0
+    d_mat_inv_sqrt = sp.diags(d_inv_sqrt)           # 对角矩阵
+    return adj.dot(d_mat_inv_sqrt).transpose().dot(d_mat_inv_sqrt).tocoo()          # D^-0.5 A D^-0.5
+
+
+def sparse_to_tuple(sparse_mx):
+    """Convert sparse matrix to tuple representation."""
+    def to_tuple(mx):
+        """坐标，值，大小"""
+        if not sp.isspmatrix_coo(mx):
+            mx = mx.tocoo()
+        coords = np.vstack((mx.row, mx.col)).transpose()
+        values = mx.data
+        shape = mx.shape
+        return coords, values, shape
+
+    if isinstance(sparse_mx, list):
+        for i in range(len(sparse_mx)):
+            sparse_mx[i] = to_tuple(sparse_mx[i])
+    else:
+        sparse_mx = to_tuple(sparse_mx)
+
+    return sparse_mx
+
+
+def load_data_gcn(dataset, node_feature_map, max_atoms, edge_feature_map):
     """
     :param dataset: 数据集路径
     :param feature_map: one-hot特征映射
@@ -18,10 +48,14 @@ def load_data_gcn(dataset, feature_map, max_atoms):
     """
     df = pd.read_csv(dataset)
 
-    # y
+    """
+    y
+    """
     y = np.array(df['Tg']).reshape(-1, 1)
 
-    # adj for batchsize=1, [max x max, ...]
+    """
+    adj
+    """
     adjs = []                                                       # 下标i，对应df第i行数据
     for i in range(df.shape[0]):
         adj_dict = {}
@@ -42,24 +76,24 @@ def load_data_gcn(dataset, feature_map, max_atoms):
                             adj_dict[atom.GetIdx()-begin].append(neighbor.GetIdx()-begin)
         adjs.append(nx.adjacency_matrix(nx.from_dict_of_lists(adj_dict)))
 
-    # zero_padding至相同大小
-    print('最大原子数：%d，邻接矩阵zero_padding...' % max_atoms)
-    for i in tqdm(range(len(adjs))):
-        mol = Chem.MolFromSmiles(df.loc[i, 'SMILES'])
-        atoms = mol.GetAtoms()
-        width = max_atoms - len(atoms)
-        if width > 0 and width % 2 == 0:
-            width = int(width/2)
-            adjs[i] = sp.csr_matrix(np.pad(adjs[i].todense(), ((width, width), (width, width)), 'constant'))
-        elif width > 0:
-            width = int(width/2)
-            adjs[i] = sp.csr_matrix(np.pad(adjs[i].todense(), ((width, width+1), (width, width+1)), 'constant'))
+    # # zero_padding至相同大小
+    # print('最大原子数：%d，邻接矩阵zero_padding...' % max_atoms)
+    # for i in tqdm(range(len(adjs))):
+    #     mol = Chem.MolFromSmiles(df.loc[i, 'SMILES'])
+    #     atoms = mol.GetAtoms()
+    #     width = max_atoms - len(atoms)
+    #     if width > 0 and width % 2 == 0:
+    #         width = int(width/2)
+    #         adjs[i] = sp.csr_matrix(np.pad(adjs[i].todense(), ((width, width), (width, width)), 'constant'))
+    #     elif width > 0:
+    #         width = int(width/2)
+    #         adjs[i] = sp.csr_matrix(np.pad(adjs[i].todense(), ((width, width+1), (width, width+1)), 'constant'))
 
     # features
-    features = []
+    node_features = []
     for i in tqdm(range(df.shape[0])):
         mol = Chem.MolFromSmiles(df.loc[i, 'SMILES'])
-        feature = np.zeros((max_atoms, len(feature_map)))
+        feature = np.zeros((max_atoms, len(node_feature_map)))
         if max_atoms >= len(mol.GetAtoms()):
             width = int((max_atoms - len(mol.GetAtoms()))/2)
             begin = 0
@@ -71,21 +105,53 @@ def load_data_gcn(dataset, feature_map, max_atoms):
         for atom in mol.GetAtoms():
             if width > 0 or begin <= atom.GetIdx() <= end:
                 res = atom.GetSymbol()                      # 原子类别
-                feature[atom.GetIdx()+width, feature_map[res]] = 1
+                feature[atom.GetIdx()+width, node_feature_map[res]] = 1
 
                 res = atom.GetTotalNumHs()                  # 连接H原子数
-                feature[atom.GetIdx()+width, feature_map['H%d' % res]] = 1
+                feature[atom.GetIdx()+width, node_feature_map['H%d' % res]] = 1
 
                 res = atom.GetDegree()                      # Degree
-                feature[atom.GetIdx()+width, feature_map['D%d' % res]] = 1
+                feature[atom.GetIdx()+width, node_feature_map['D%d' % res]] = 1
 
                 res = atom.GetIsAromatic()                  # 芳香性
-                feature[atom.GetIdx()+width, feature_map['A%d' % res]] = 1
+                feature[atom.GetIdx()+width, node_feature_map['A%d' % res]] = 1
 
                 res = atom.IsInRing()                       # 是否在环上
-                feature[atom.GetIdx()+width, feature_map['R%d' % res]] = 1
-        features.append(sp.csr_matrix(feature))
-    return adjs, features, y
+                feature[atom.GetIdx()+width, node_feature_map['R%d' % res]] = 1
+        node_features.append(sp.csr_matrix(feature))
+
+    edge_features = []
+    for i in tqdm(range(df.shape[0])):
+        mol = Chem.MolFromSmiles(df.loc[i, 'SMILES'])
+        feature = np.zeros((max_atoms, max_atoms, 1, len(edge_feature_map)))
+        num = 1/len(edge_feature_map)
+        if max_atoms >= len(mol.GetAtoms()):
+            width = int((max_atoms - len(mol.GetAtoms()))/2)
+            begin = 0
+            end = len(mol.GetAtoms())-1
+        else:
+            begin = int((len(mol.GetAtoms())-max_atoms)/2)
+            end = begin+max_atoms-1
+            width = -begin
+        for bond in mol.GetBonds():
+            if width > 0 or \
+                    (begin <= bond.GetBeginAtomIdx() <= end and begin <= bond.GetEndAtomIdx() <= end):
+                res = bond.GetBondTypeAsDouble()
+                beginIdx = bond.GetBeginAtomIdx()+width
+                endIdx = bond.GetEndAtomIdx()+width
+                feature[beginIdx, endIdx, 0, edge_feature_map['T'+str(res)]] = num
+                feature[endIdx, beginIdx, 0, edge_feature_map['T'+str(res)]] = num
+
+                res = bond.IsInRing()
+                feature[beginIdx, endIdx, 0, edge_feature_map['R%d' % res]] = num
+                feature[endIdx, beginIdx, 0, edge_feature_map['R%d' % res]] = num
+
+                res = bond.GetIsConjugated()
+                feature[beginIdx, endIdx, 0, edge_feature_map['C%d' % res]] = num
+                feature[endIdx, beginIdx, 0, edge_feature_map['C%d' % res]] = num
+        edge_features.append(feature)
+
+    return adjs, node_features, y, edge_features
 
 
 def encode_one_hot(df, feature):
@@ -128,11 +194,43 @@ def preprocess_cfeatures(continuous_features):
     return continuous_features
 
 
-def train_val_split_gcn(supports, features, y, val_ratio, test_ratio):
+def my_chebyshev_polynomials(adj, k, max_atoms):
+    """Calculate Chebyshev polynomials up to order k. Return a list of sparse matrices (tuple representation)."""
+
+    adj_normalized = normalize_adj(adj)                     # D^-0.5 A D^-0.5
+    laplacian = sp.eye(adj.shape[0]) - adj_normalized       # I - D^-0.5 A D^-0.5
+    largest_eigval, _ = eigsh(laplacian, 1, which='LM')     # 求最大特征值
+    scaled_laplacian = (2. / largest_eigval[0]) * laplacian - sp.eye(adj.shape[0])  # 2L/max - I
+
+    t_k = list()
+    t_k.append(sp.eye(adj.shape[0]))
+    t_k.append(scaled_laplacian)
+
+    def chebyshev_recurrence(t_k_minus_one, t_k_minus_two, scaled_lap):
+        s_lap = sp.csr_matrix(scaled_lap, copy=True)
+        return 2 * s_lap.dot(t_k_minus_one) - t_k_minus_two
+
+    for i in range(2, k+1):
+        t_k.append(chebyshev_recurrence(t_k[-1], t_k[-2], scaled_laplacian))
+
+    for i in range(len(t_k)):
+        width = max_atoms - adj.shape[0]
+        if width > 0 and width % 2 == 0:
+            width = int(width/2)
+            t_k[i] = sp.csr_matrix(np.pad(t_k[i].todense(), ((width, width), (width, width)), 'constant'))
+        elif width > 0:
+            width = int(width/2)
+            t_k[i] = sp.csr_matrix(np.pad(t_k[i].todense(), ((width, width+1), (width, width+1)), 'constant'))
+
+    return sparse_to_tuple(t_k)
+
+
+def train_val_split_gcn(supports, node_features, edge_features, y, val_ratio, test_ratio):
     val_num = int(len(supports)*(1-val_ratio-test_ratio))
     test_num = int(len(supports)*(1-test_ratio))
-    return supports[:val_num], features[:val_num], y[:val_num, :],\
-           supports[val_num:test_num], features[val_num:test_num], y[val_num:test_num, :]
+    return supports[:val_num], node_features[:val_num], edge_features[:val_num], y[:val_num, :],\
+           supports[val_num:test_num], node_features[val_num:test_num], edge_features[val_num:test_num],\
+           y[val_num:test_num, :]
 
 
 def test_split_gcn(supports, features, y, test_ratio):
