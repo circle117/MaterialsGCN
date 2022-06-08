@@ -1,37 +1,3 @@
-## 数据预处理
-
-**PID与mol文件** 转换为对应的SMILES
-
-**Tg** 不变
-
-**Tg_Method**
-* 使用所有检测方法得到的温度
-* 使用某一特定检测方法得到的温度
-
-**Type (Polyaddition, Polycondensation)**
-* 使用该特征
-* 不使用该特征
-
-**Method**
-* 选择一步法
-* 选择两步法
-
-**Solvent** 不变
-
-**Temperature1**
-* 分箱
-
-**Time1**
-* 分箱
-
-**Method2** 不变
-
-**min_temp**
-
-**max_temp**
-
-**Time2**
-
 # 数据集
 
 数据收集条件
@@ -49,42 +15,47 @@
 
 - | No   | 条件                         | 数量 | 用途               | 删除异常点后的数据量 |
   | ---- | ---------------------------- | ---- | ------------------ | -------------------- |
-  | 1    | 删除重复材料分子，保留第一条 | 881  | 训练GCN模型        | 787+89=876           |
-  | 2    | 两步法数据                   | 635  | 训练MMGCN模型      | 559+63=622           |
+  | 1    | 删除重复材料分子，保留第一条 | 881  | 训练GCN模型        | 876                  |
+  | 2    | 两步法数据                   | 635  | 训练MMGCN模型      | 622                  |
   | 3    | 两步法数据删除重复材料分子   | 522  | 对比GCN与MMGCN模型 | 463+53=516           |
-
+  
   分成dataset x.1以及dataset x.2 
-
+  
   - dataset x.1作为训练数据集
   - dataset x.2用于测试模型的通用性
+  
 
 # EXP 1 训练GCN
 
 使用删除重复分子的所有数据训练GCN模型
+$$
+H^{(l)}=\sum_{i=0}^{2}S_iH^{(l-1)}W_i
+$$
+对于一阶：
+$$
+A_{i,j} =sigmoid(W_{i,j}V_{i,j}+b)\\
+H^{(l)}=(A\odot S_i)H^{(l-1)}W_i
+$$
 
 * 参数
 
-  | lr   | batchSize | weight decay | hidden | graphs | dropout | degree |
-  | ---- | --------- | ------------ | ------ | ------ | ------- | ------ |
-  | 0.01 | 16        | 0.05         | 64     | 5      | 0.3     | 2      |
+  | lr   | batchSize | weight decay  | hidden | graphs | Dense | maxAtoms | edgeLayers | edgeBias | dropout | degree |
+  | ---- | --------- | ------------- | ------ | ------ | ----- | -------- | ---------- | -------- | ------- | ------ |
+  | 0.01 | 16        | 0.005(前三层) | 64     | 4      | 8     | 80       | All        | 间隔     | 0.3     | 2      |
 
 * result - dataset 1.1
 
-  | trainLoss | trainAccu | valLoss  | valAccu  | testLoss | testAccu |
-  | --------- | --------- | -------- | -------- | -------- | -------- |
-  | 30.11712  | 28.92872  | 32.27017 | 31.08177 | 28.51193 | 27.32353 |
+  | trainLoss | trainAccu | valLoss | valAccu  | testLoss | testAccu |
+  | --------- | --------- | ------- | -------- | -------- | -------- |
+  | 21.99155  | 20.87298  | 31.1128 | 29.99423 | 24.45974 | 23.34117 |
 
 * result - dataset 1.2
 
   | Loss     | Accuracy |
   | -------- | -------- |
-  | 55.31946 | 54.13107 |
+  | 47.24541 | 46.12684 |
 
-* Save path: ./myGCN/GCN/gcn.ckpt
-
-### 实验结论
-
-- [ ] <font color='red'>对于较长的分子预测效果差</font>
+* Save path: ./myGCN/GCN_23/gcn.ckpt
 
 # EXP 2 训练MMGCN
 
@@ -96,9 +67,11 @@
 
 ```mermaid
 graph TD;
-	GCN-->TabNet
-	parameters-->TabNet
-	TabNet-->FC
+	高分子材料GCN-->CONCAT
+	合成参数-->CONCAT
+	CONCAT-->TabNet
+	TabNet-->全连接层
+	全连接层-->玻璃化转变温度
 
 ```
 
@@ -117,9 +90,10 @@ graph TD;
 
 ```mermaid
 graph TD;
-	GCN-->CONCAT
+	高分子材料GCN-->CONCAT
 	TabNet-->CONCAT
-	CONCAT-->FC
+	CONCAT-->全连接层
+	全连接层-->玻璃化转变温度
 ```
 
 ### 实验步骤
@@ -163,17 +137,24 @@ graph TD;
   | ---- | --------- | --------- | ------------------ | ---------------- | ------------------ | ----------------- |
   | 0.01 | 32        | 32        | 8                  | 4                | 4                  | 1.5               |
 
-* result - dataset 2.1
+* result
 
-  | trainAccu | valAccu  | testAccu |
-  | --------- | -------- | -------- |
-  | 22.08470  | 20.97842 | 25.63186 |
+  | trainAccu | R2      | valAccu  | R2      | testAccu | R2      |
+  | --------- | ------- | -------- | ------- | -------- | ------- |
+  | 21.00995  | 0.67619 | 27.14547 | 0.66798 | 24.97895 | 0.46876 |
 
-* result - dataset 2.2
+  | trainAccu | R2      | valAccu  | R2      | testAccu | R2      |
+  | --------- | ------- | -------- | ------- | -------- | ------- |
+  | 20.41369  | 0.69082 | 25.15167 | 0.70094 | 24.91037 | 0.50544 |
 
-  | Accuracy |
-  | -------- |
-  | 46.78223 |
+* Save path: ./myMMGCN/MMGCN/mmgcn.ckpt
 
-* Save path: ./myMMGCN/MMGCN_4/mmgcn.ckpt
+# EXP3 比较
 
+GCN
+
+| trainLoss | trainAccu | R       | valLoss  | valAccu  | R       | testLoss | testAccu | R       |
+| --------- | --------- | ------- | -------- | -------- | ------- | -------- | -------- | ------- |
+| 27.06340  | 25.57396  | 0.57902 | 32.23703 | 30.74669 | 0.60007 | 30.07337 | 28.58302 | 0.59284 |
+
+MMGCN
