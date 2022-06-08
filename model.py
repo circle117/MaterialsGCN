@@ -105,7 +105,6 @@ class GCN(Model):
         self.output_dim = placeholders['labels'][0].get_shape().as_list()[1]       # 分类数
         self.placeholders = placeholders
         self.labels = tf.concat(placeholders['labels'], 0)
-        self.temp = placeholders['labels'][0]
 
         self.layers = []
 
@@ -117,8 +116,9 @@ class GCN(Model):
 
     def _loss(self):
         # Weight decay loss
-        for var in self.layers[0].vars.values():
-            self.loss += FLAGS.weight_decay * tf.nn.l2_loss(var)
+        for layer in self.layers:
+            for var in layer.vars.values():
+                self.loss += FLAGS.weight_decay * tf.nn.l2_loss(var)
 
         # Mean absolute error
         self.loss += mean_absolute_error(self.outputs, self.labels)
@@ -134,45 +134,47 @@ class GCN(Model):
                                             act=tf.nn.relu,
                                             dropout=False,
                                             sparse_inputs=True,
-                                            is_edge_feature=False,
+                                            is_edge_feature=True,
+                                            edge_bias=True,
                                             logging=self.logging))
 
         for i in range(self.num_graphs-1):
-            if i % 2 == 1:
-                is_edge_feature = True
+            if i % 2 == 0:
+                edge_bias = True
             else:
-                is_edge_feature = False
+                edge_bias = False
             self.layers.append(GraphConvolution(input_dim=FLAGS.hidden,
                                                 output_dim=FLAGS.hidden,
                                                 placeholders=self.placeholders,
                                                 act=tf.nn.relu,
-                                                dropout=True,
+                                                dropout=False,
                                                 is_edge_feature=True,
+                                                edge_bias=edge_bias,
                                                 logging=self.logging))
 
-        self.layers.append(Dense1(input_dim=FLAGS.hidden,
-                                  output_dim=self.output_dim,
-                                  placeholders=self.placeholders,
-                                  act=tf.nn.relu,
-                                  dropout=True,
-                                  bias=True,
-                                  logging=self.logging))
+        self.layers.append(Dense(input_dim=FLAGS.hidden,
+                                 output_dim=self.output_dim,
+                                 placeholders=self.placeholders,
+                                 act=tf.nn.relu,
+                                 dropout=True,
+                                 bias=True,
+                                 logging=self.logging))
 
-        self.layers.append(Dense1(input_dim=self.num_nodes,
-                                  output_dim=FLAGS.num_dense,
-                                  placeholders=self.placeholders,
-                                  act=tf.nn.relu,
-                                  dropout=True,
-                                  bias=True,
-                                  logging=self.logging))
+        self.layers.append(Dense(input_dim=self.num_nodes,
+                                 output_dim=FLAGS.num_dense,
+                                 placeholders=self.placeholders,
+                                 act=tf.nn.relu,
+                                 dropout=True,
+                                 bias=True,
+                                 logging=self.logging))
 
-        self.layers.append(Dense1(input_dim=FLAGS.num_dense,
-                                  output_dim=self.output_dim,
-                                  placeholders=self.placeholders,
-                                  act=tf.nn.softplus,
-                                  dropout=False,
-                                  bias=True,
-                                  logging=self.logging))
+        self.layers.append(Dense(input_dim=FLAGS.num_dense,
+                                 output_dim=self.output_dim,
+                                 placeholders=self.placeholders,
+                                 act=tf.nn.softplus,
+                                 dropout=False,
+                                 bias=True,
+                                 logging=self.logging))
 
     def build(self):
         with tf.variable_scope(self.name):
@@ -259,8 +261,6 @@ class MMGCN(Model):
         self.num_nodes = num_nodes                                              # gcn节点数
         self.num_graphs = num_graphs                                            # GCN层数
         self.output_dim = placeholders['labels'][0].get_shape().as_list()[1]    # 模型输出大小
-        # self.tabnet_input_dim = placeholders['con_features'][0].get_shape().as_list()[1] + \
-        #                      FLAGS.embed_dim*len(self.d_feature_dim)
 
         # 层
         self.gcn_layers = []                                                    # GCN层
@@ -293,8 +293,9 @@ class MMGCN(Model):
 
     def _loss(self):
         # Weight decay loss
-        for var in self.gcn_layers[0].vars.values():
-            self.loss += FLAGS.weight_decay * tf.nn.l2_loss(var)
+        for layer in self.gcn_layers[:self.num_graphs]:
+            for var in layer.vars.values():
+                self.loss += FLAGS.weight_decay * tf.nn.l2_loss(var)
 
         # Mean absolute error
         self.loss += mean_absolute_error(self.outputs, self.labels)
@@ -313,49 +314,57 @@ class MMGCN(Model):
                                                 act=tf.nn.relu,
                                                 dropout=False,
                                                 sparse_inputs=True,
+                                                is_edge_feature=True,
+                                                edge_bias=True,
                                                 logging=self.logging,
                                                 name='graph_convolution_'+str(cnt)))
         cnt += 1
 
         for i in range(FLAGS.num_graphs-1):
+            if i % 2 == 0:
+                edge_bias = True
+            else:
+                edge_bias = False
             self.gcn_layers.append(GraphConvolution(input_dim=FLAGS.gcn_hidden,
                                                     output_dim=FLAGS.gcn_hidden,
                                                     placeholders=self.placeholders,
                                                     act=tf.nn.relu,
                                                     dropout=False,
+                                                    is_edge_feature=True,
+                                                    edge_bias=edge_bias,
                                                     logging=self.logging,
                                                     name='graph_convolution_'+str(cnt)))
             cnt += 1
 
         cnt = 1
-        self.gcn_layers.append(Dense1(input_dim=FLAGS.gcn_hidden,
-                                      output_dim=self.output_dim,
-                                      placeholders=self.placeholders,
-                                      act=tf.nn.relu,
-                                      dropout=True,
-                                      bias=True,
-                                      logging=self.logging,
-                                      name='dense_'+str(cnt)))
+        self.gcn_layers.append(Dense(input_dim=FLAGS.gcn_hidden,
+                                     output_dim=self.output_dim,
+                                     placeholders=self.placeholders,
+                                     act=tf.nn.relu,
+                                     dropout=True,
+                                     bias=True,
+                                     logging=self.logging,
+                                     name='dense_'+str(cnt)))
         cnt += 1
 
-        self.gcn_layers.append(Dense1(input_dim=self.num_nodes,
-                                      output_dim=FLAGS.gcn_dense,
-                                      placeholders=self.placeholders,
-                                      act=tf.nn.relu,
-                                      dropout=False,
-                                      bias=True,
-                                      logging=self.logging,
-                                      name='dense_'+str(cnt)))
+        self.gcn_layers.append(Dense(input_dim=self.num_nodes,
+                                     output_dim=FLAGS.gcn_dense,
+                                     placeholders=self.placeholders,
+                                     act=tf.nn.relu,
+                                     dropout=True,
+                                     bias=True,
+                                     logging=self.logging,
+                                     name='dense_'+str(cnt)))
         cnt += 1
 
-        self.gcn_layers.append(Dense1(input_dim=FLAGS.gcn_dense,
-                                      output_dim=self.output_dim,
-                                      placeholders=self.placeholders,
-                                      act=tf.nn.softplus,
-                                      dropout=False,
-                                      bias=True,
-                                      logging=self.logging,
-                                      name='dense_'+str(cnt)))
+        self.gcn_layers.append(Dense(input_dim=FLAGS.gcn_dense,
+                                     output_dim=self.output_dim,
+                                     placeholders=self.placeholders,
+                                     act=tf.nn.softplus,
+                                     dropout=False,
+                                     bias=True,
+                                     logging=self.logging,
+                                     name='dense_'+str(cnt)))
 
     def _build_model(self):
         """
@@ -363,7 +372,7 @@ class MMGCN(Model):
         """
         cnt = 1
         for d_feature in self.d_feature_dim:
-            self.embedding_layers[d_feature[0]] = Dense1(
+            self.embedding_layers[d_feature[0]] = Dense(
                 input_dim=d_feature[1],
                 output_dim=FLAGS.embed_dim,
                 placeholders=self.placeholders,
@@ -378,14 +387,14 @@ class MMGCN(Model):
         """
         Dense
         """
-        self.dense_layer = Dense1(input_dim=FLAGS.output_dim+FLAGS.gcn_dense,
-                                  output_dim=self.output_dim,
-                                  placeholders=self.placeholders,
-                                  act=lambda x: x,
-                                  dropout=False,
-                                  bias=True,
-                                  logging=self.logging,
-                                  name='model_dense_1')
+        self.dense_layer = Dense(input_dim=FLAGS.output_dim+FLAGS.gcn_dense,
+                                 output_dim=self.output_dim,
+                                 placeholders=self.placeholders,
+                                 act=lambda x: x,
+                                 dropout=False,
+                                 bias=True,
+                                 logging=self.logging,
+                                 name='model_dense_1')
 
     def _build_tabnet(self, data, reuse, is_training):
         with tf.variable_scope('tabnet', reuse=reuse):
@@ -513,7 +522,7 @@ class MMGCN(Model):
                     # Feature selection.
                     masked_features = tf.multiply(mask_values, data)
 
-            return output_aggregated
+            return output_aggregated, aggregated_mask_values
 
     def build(self):
         with tf.variable_scope('gcn'):
@@ -554,6 +563,7 @@ class MMGCN(Model):
         """
         self.tabnet_inputs = []
         for name, dim in self.d_feature_dim:
+            print(name)
             self.tabnet_inputs.append(self.embedding_layers[name](self.tabnet_inputs_d[name], 0))
         self.tabnet_inputs.append(self.tabnet_inputs_c)
         self.tabnet_inputs = tf.concat(self.tabnet_inputs, axis=1)          # batch size, features
@@ -561,7 +571,7 @@ class MMGCN(Model):
         """
         TabNet
         """
-        self.tabnet_output = self._build_tabnet(self.tabnet_inputs, reuse=False, is_training=self.is_training)
+        self.tabnet_output, self.temp = self._build_tabnet(self.tabnet_inputs, reuse=False, is_training=self.is_training)
         # if not self.reuse:
         #     self.reuse = True
 
@@ -584,7 +594,8 @@ class MMGCN(Model):
         self._accuracy()
 
         if FLAGS.train_model == 'GCN':
-            self.opt_op = self.optimizer.minimize(self.loss)
+            grads_and_vars = self.optimizer.compute_gradients(self.loss, variables_gcn)
+            self.opt_op = self.optimizer.apply_gradients(grads_and_vars)
         elif FLAGS.train_model == 'TabNet':
             update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
             with tf.control_dependencies(update_ops):
@@ -593,7 +604,7 @@ class MMGCN(Model):
         elif FLAGS.train_model == 'All':
             update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
             with tf.control_dependencies(update_ops):
-                self.opt_op = self.optimizer.minimize(self.accuracy)
+                self.opt_op = self.optimizer.minimize(self.loss)
 
     def predict(self, output):
         return tf.nn.softplus(output)

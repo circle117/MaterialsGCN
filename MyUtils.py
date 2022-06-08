@@ -170,8 +170,8 @@ def encode_one_hot(df, feature):
     return np.array(feature_ont_hot)
 
 
-def load_data(dataset, feature_map, feature_name):
-    adjs, features, y = load_data_gcn(dataset, feature_map)
+def load_data(dataset, node_feature_map, feature_name, max_atoms, edge_feature_map):
+    adjs, node_features, y, edge_features = load_data_gcn(dataset, node_feature_map, max_atoms, edge_feature_map)
 
     df = pd.read_csv(dataset)
 
@@ -185,7 +185,7 @@ def load_data(dataset, feature_map, feature_name):
         continuous_features.append(np.array(list(df[name].values)))
     continuous_features = np.stack(continuous_features, axis=1)
 
-    return adjs, features, y, discrete_features, continuous_features
+    return adjs, node_features, y, edge_features, discrete_features, continuous_features
 
 
 def preprocess_cfeatures(continuous_features):
@@ -233,9 +233,9 @@ def train_val_split_gcn(supports, node_features, edge_features, y, val_ratio, te
            y[val_num:test_num, :]
 
 
-def test_split_gcn(supports, features, y, test_ratio):
+def test_split_gcn(supports, features, edge_features, y, test_ratio):
     test_num = int(len(supports)*(1-test_ratio))
-    return supports[test_num:], features[test_num:], y[test_num:, :]
+    return supports[test_num:], features[test_num:], edge_features[test_num:], y[test_num:, :]
 
 
 def train_val_split_mmgcn(discrete_features, continuous_features, val_ratio, test_ratio):
@@ -258,11 +258,12 @@ def test_split_mmgcn(discrete_features, continuous_features, test_ratio):
     return discrete_features_test, continuous_features[test_num:]
 
 
-def my_construct_feed_dict(gcn_feature, support, y, con_feature, batch, D_feature_name, placeholders):
+def my_construct_feed_dict(gcn_feature, support, y, edge_features, con_feature, batch, D_feature_name, placeholders):
     feed_dict = {}
     # feed_dict.update({placeholders['support'][i]: support[i] for i in range(len(support))})
     feed_dict.update({placeholders['features'][i]: gcn_feature[i] for i in range(len(gcn_feature))})
     feed_dict.update({placeholders['labels'][i]: y[i] for i in range(len(y))})
+    feed_dict.update({placeholders['edge_features'][i]: edge_features[i] for i in range(len(edge_features))})
     feed_dict.update({placeholders['con_features'][i]: con_feature[i] for i in range(len(con_feature))})
     feed_dict.update({placeholders['num_features_nonzero'][i]: gcn_feature[i][1].shape
                       for i in range(len(gcn_feature))})

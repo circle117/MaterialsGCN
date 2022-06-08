@@ -30,22 +30,22 @@ Setting
 flags = tf.app.flags
 FLAGS = flags.FLAGS
 # path
-flags.DEFINE_string('dataset', './dataset/dataForGCN.csv', 'Dataset string.')
-flags.DEFINE_string('savepath', "./myGCN/GCN_4", 'Save path string')
+flags.DEFINE_string('dataset', './dataset/dataForCompare.csv', 'Dataset string.')
+flags.DEFINE_string('savepath', "./ModelForCompare/GCN", 'Save path string')
 # val test ratio
 flags.DEFINE_float('val_ratio', 0.1, 'Ratio of validation dataset')
 flags.DEFINE_float('test_ratio', 0.1, 'Ratio of test dataset')
 # model
 flags.DEFINE_string('model', 'gcn_cheby', 'Model string.')
-flags.DEFINE_float('learning_rate', 0.005, 'Initial learning rate.')
+flags.DEFINE_float('learning_rate', 0.01, 'Initial learning rate.')
 flags.DEFINE_integer('epochs', 200, 'Number of epochs to train.')
 flags.DEFINE_integer('batchSize', 16, 'Number of batches to train')
-flags.DEFINE_integer('hidden', 32, 'Number of units in hidden layer 1.')
+flags.DEFINE_integer('hidden', 64, 'Number of units in hidden layer 1.')
 flags.DEFINE_integer('num_graphs', 4, 'Number of graphs')
-flags.DEFINE_integer('num_dense', 16, 'Number of units in dense layer')
-flags.DEFINE_integer('max_atoms', 60, 'Number of atoms')
+flags.DEFINE_integer('num_dense', 4, 'Number of units in dense layer')
+flags.DEFINE_integer('max_atoms', 80, 'Number of atoms')
 flags.DEFINE_float('dropout', 0.3, 'Dropout rate (1 - keep probability).')
-flags.DEFINE_float('weight_decay', 5e-2, 'Weight for L2 loss on embedding matrix.')
+flags.DEFINE_float('weight_decay', 5e-3, 'Weight for L2 loss on embedding matrix.')
 flags.DEFINE_integer('early_stopping_begin', 20, 'Tolerance for early stopping (# of epochs).')
 flags.DEFINE_integer('early_stopping', 10, 'Tolerance for early stopping (# of epochs).')
 flags.DEFINE_integer('max_degree', 2, 'Maximum Chebyshev polynomial degree.')

@@ -82,11 +82,11 @@ class Layer(object):
             tf.summary.histogram(self.name + '/vars/' + var, self.vars[var])
 
 
-class Dense1(Layer):
+class Dense(Layer):
     """Dense layer.先dropout"""
     def __init__(self, input_dim, output_dim, placeholders, dropout=0., sparse_inputs=False,
                  act=tf.nn.relu, bias=False, featureless=False, **kwargs):
-        super(Dense1, self).__init__(**kwargs)
+        super(Dense, self).__init__(**kwargs)
 
         if dropout:
             self.dropout = placeholders['dropout']
@@ -129,53 +129,6 @@ class Dense1(Layer):
         return self.act(output)
 
 
-class Dense2(Layer):
-    """Dense layer.先dropout"""
-    def __init__(self, input_dim, output_dim, placeholders, dropout=0., sparse_inputs=False,
-                 act=tf.nn.relu, bias=False, featureless=False, **kwargs):
-        super(Dense2, self).__init__(**kwargs)
-
-        if dropout:
-            self.dropout = placeholders['dropout']
-        else:
-            self.dropout = 0.
-
-        self.act = act
-        self.sparse_inputs = sparse_inputs
-        self.featureless = featureless
-        self.bias = bias
-
-        # helper variable for sparse dropout
-        self.num_features_nonzero = placeholders['num_features_nonzero']
-
-        with tf.variable_scope(self.name + '_vars'):
-            self.vars['weights'] = glorot([input_dim, output_dim],
-                                          name='weights')
-            if self.bias:
-                self.vars['bias'] = zeros([input_dim], name='bias')
-
-        if self.logging:
-            self._log_vars()
-
-    def _call(self, inputs, index):
-        x = inputs
-
-        # dropout
-        if self.sparse_inputs:
-            x = sparse_dropout(x, 1-self.dropout, self.num_features_nonzero)
-        else:
-            x = tf.nn.dropout(x, 1-self.dropout)
-
-        # transform
-        output = dot(self.vars['weights'], x, sparse=self.sparse_inputs)
-
-        # bias
-        if self.bias:
-            output += self.vars['bias']
-
-        return self.act(output)
-
-
 class Embedding(Layer):
     def __init__(self, input_dim, output_dim, **kwargs):
         super(Embedding, self).__init__(**kwargs)
@@ -198,7 +151,7 @@ class Embedding(Layer):
 class GraphConvolution(Layer):
     """Graph convolution layer."""
     def __init__(self, input_dim, output_dim, placeholders, dropout=0.,
-                 sparse_inputs=False, is_edge_feature=False, act=tf.nn.relu, bias=False,
+                 sparse_inputs=False, is_edge_feature=False, act=tf.nn.relu, bias=False, edge_bias=False,
                  featureless=False, **kwargs):
         super(GraphConvolution, self).__init__(**kwargs)
 
@@ -213,6 +166,7 @@ class GraphConvolution(Layer):
         self.support = placeholders['support'][0]
         self.sparse_inputs = sparse_inputs
         self.is_edge_feature = is_edge_feature
+        self.edge_bias = edge_bias
         self.featureless = featureless
         self.bias = bias
         self.input_dim = input_dim
@@ -230,12 +184,13 @@ class GraphConvolution(Layer):
                                                         name='weights_' + str(i))
             if self.bias:
                 self.vars['bias'] = zeros([output_dim], name='bias')
-            if self.is_edge_feature:
+            if self.is_edge_feature:                # 是否使用边特征
                 self.vars['weight_edge'] = glorot([self.num_nodes, self.num_nodes*self.edge_dim],
                                                   name='weight_edge')
                 self.vars['weight_edge'] = tf.reshape(self.vars['weight_edge'],
                                                       [self.num_nodes, self.num_nodes, self.edge_dim, 1])
-                self.vars['bias_edge'] = zeros([self.num_nodes, self.num_nodes], name='bias_edge')
+                if self.edge_bias:
+                    self.vars['bias_edge'] = zeros([1, 1], name='bias_edge')
 
         if self.logging:
             self._log_vars()
@@ -255,20 +210,23 @@ class GraphConvolution(Layer):
         # convolve
         supports = list()
         for i in range(len(self.support)):
-            # featureless 不使用x
+            # 不使用x
             if not self.featureless:
                 pre_sup = dot(x, self.vars['weights_' + str(i)],
                               sparse=self.sparse_inputs)
             else:
                 pre_sup = self.vars['weights_' + str(i)]
-            if self.is_edge_feature and i == 1:
+            if self.is_edge_feature and i == 1:             # 1阶邻居，加入边特征
                 edge = dot(self.edge_feature, self.vars['weight_edge'], sparse=False)
-                edge = tf.reshape(edge, [self.num_nodes, self.num_nodes]) + self.vars['bias_edge']
+                edge = tf.reshape(edge, [self.num_nodes, self.num_nodes])
+                if self.edge_bias:
+                    edge += self.vars['bias_edge']
                 edge = tf.nn.sigmoid(edge)
+                mask = tf.ones(self.num_nodes) - tf.eye(self.num_nodes)         # 节点自身的值保持不变
+                edge = tf.multiply(edge, mask) + tf.eye(self.num_nodes)
                 support_dense = tf.sparse_tensor_to_dense(self.support[i])
                 support = tf.multiply(edge, support_dense)
                 support = dot(support, pre_sup, sparse=False)
-                self.temp = support
             else:
                 support = dot(self.support[i], pre_sup, sparse=True)
             supports.append(support)

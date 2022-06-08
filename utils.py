@@ -67,11 +67,12 @@ def preprocess_adj(adj):
     return sparse_to_tuple(adj_normalized)
 
 
-def construct_feed_dict(features, support, labels, placeholders):
+def construct_feed_dict(features, support, labels, edge_features, placeholders):
     """Construct feed dictionary."""
     feed_dict = dict()
     feed_dict.update({placeholders['labels'][i]: labels[i] for i in range(len(labels))})
     feed_dict.update({placeholders['features'][i]: features[i] for i in range(len(features))})
+    feed_dict.update({placeholders['edge_features'][i]: edge_features[i] for i in range(len(edge_features))})
     # feed_dict.update({placeholders['batchSize']: batchSize})
     # feed_dict.update({placeholders['support'][i]: support[i] for i in range(len(support))})
     feed_dict.update({placeholders['num_features_nonzero'][i]: features[i][1].shape for i in range(len(features))})
