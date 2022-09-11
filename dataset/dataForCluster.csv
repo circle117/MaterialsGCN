@@ -1,0 +1,11 @@
+SMILES,label,Tg
+Cc1cccc(Oc2ccc(-c3ccc(Oc4cccc(-n5c(=O)c6cc7c(=O)n(C)c(=O)c7cc6c5=O)c4)cc3)cc2)c1,Mitsui Chem Aurum,250
+Cc1ccc(Oc2cccc(Oc3ccc(N4C(=O)c5ccc(-c6ccc7c(c6)C(=O)N(C)C7=O)cc5C4=O)cc3)c2)cc1,Mitsui Chem Super Aurum,190
+Cc1cccc(C(=O)c2cccc(N3C(=O)c4ccc(C(=O)c5ccc6c(c5)C(=O)N(C)C6=O)cc4C3=O)c2)c1,NASA LaRC-TPI,242
+Cc6ccc(Oc5cccc(n4c(=O)c3ccc(c2ccc1c(=O)n(C)c(=O)c1c2)cc3c4=O)c5)cc6,NASA LaRC-SCI,230
+Cc1cccc(N2C(=O)c3ccc(Oc4ccc(C(C)(C)c5ccc(Oc6ccc7c(c6)C(=O)N(C)C7=O)cc5)cc4)cc3C2=O)c1,SABIC(GE Plastics)UItem 1000,217
+Cc1ccc(S(=O)(=O)c2ccc(N3C(=O)c4ccc(Oc5ccc(C(C)(C)c6ccc(Oc7ccc8c(c7)C(=O)N(C)C8=O)cc6)cc5)cc4C3=O)cc2)cc1,SABIC(GE Plastics)Extem VH/XH,250
+Cc1ccc(Oc2ccc(N3C(=O)c4ccc(Oc5ccc6c(c5)C(=O)N(C)C6=O)cc4C3=O)cc2)cc1,上海塑料所YS 20,268
+Cc1ccc(Oc2ccc(N3C(=O)c4ccc(Oc5ccc(Oc6ccc7c(c6)C(=O)N(C)C7=O)cc5)cc4C3=O)cc2)cc1,吉林高琦 YHPI,223
+Cc1ccc(N2C(=O)c3ccc(Oc4ccc(C(C)(C)c5ccc(Oc6ccc7c(c6)C(=O)N(C)C7=O)cc5)cc4)cc3C2=O)cc1,SABIC(GE Plastics)UItem CRS 5000,227
+Cc1cccc(-n2c(=O)c3cc4c(=O)n(-c5cccc(N6C(=O)c7ccc(Oc8ccc(C(C)(C)c9ccc(Oc%10ccc%11c(c%10)C(=O)N(C)C%11=O)cc9)cc8)cc7C6=O)c5)c(=O)c4cc3c2=O)c1,SABIC(GE Plastics) UItem 6000,234
