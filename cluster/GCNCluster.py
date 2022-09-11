@@ -3,18 +3,19 @@ from MyUtils import *
 from utils import *
 from model import GCN
 import numpy as np
+from sklearn.cluster import KMeans
 
 tf.disable_v2_behavior()
 
-NODE_FEATURE_LIST = ['*', 'C', 'N', 'O', 'F', 'S', 'Si', 'P',       # 原子类别
-                     'H0', 'H1', 'H2', 'H3',                        # 连接H数量
-                     'D1', 'D2', 'D3', 'D4',                        # Degree
-                     'A0', 'A1',                                    # 芳香性
-                     'R0', 'R1']                                    # 是否在环上
+NODE_FEATURE_LIST = ['*', 'C', 'N', 'O', 'F', 'S', 'Si', 'P',       # atom type
+                     'H0', 'H1', 'H2', 'H3',                        # the number of connected H atoms
+                     'D1', 'D2', 'D3', 'D4',                        # degree
+                     'A0', 'A1',                                    # aromaticity
+                     'R0', 'R1']                                    # is in ring
 
-EDGE_FEATURE_LIST = ['T1.0', 'T1.5', 'T2.0', 'T3.0',                # 键类型
-                     'R0', 'R1',                                    # 是否在环上
-                     'C0', 'C1']                                    # 是否共轭
+EDGE_FEATURE_LIST = ['T1.0', 'T1.5', 'T2.0', 'T3.0',                # bond type
+                     'R0', 'R1',                                    # is in ring
+                     'C0', 'C1']                                    # is conjugated
 
 # Set random seed
 seed = 117
@@ -27,7 +28,7 @@ Setting
 flags = tf.app.flags
 FLAGS = flags.FLAGS
 # path
-flags.DEFINE_string('dataset', './dataset/pi.csv', 'Dataset string.')
+flags.DEFINE_string('dataset', './dataset/dataForCluster.csv', 'Dataset string.')
 flags.DEFINE_string('savepath', "./myGCN/GCN/gcn.ckpt", 'Save path string')
 # val test ratio
 flags.DEFINE_float('val_ratio', 0.1, 'Ratio of validation dataset')
@@ -79,9 +80,8 @@ else:
 
 # Define placeholders
 placeholders = {
-    # T_k的数量，相当于Sum的参数beta
+    # feature：[nodes, features]
     # 'support': [tf.sparse_placeholder(tf.float32) for _ in range(num_supports)],
-    # 特征：节点数, 特征数
     'features': [tf.sparse_placeholder(tf.float32, shape=tf.constant(node_features[0][2], dtype=tf.int64))],
     'edge_features': [tf.placeholder(tf.float32, shape=(FLAGS.max_atoms, FLAGS.max_atoms, 1, len(edge_feature_map)))
                       for _ in range(FLAGS.batchSize)],
@@ -122,9 +122,8 @@ for i in range(len(node_features)):
     res.append(out.reshape(-1))
 
 df = pd.read_csv(FLAGS.dataset)
-from sklearn.cluster import KMeans
 
-
+# kmeans cluster
 res_dict = {}
 for k in range(3, 6):
     res_dict[k] = {}
