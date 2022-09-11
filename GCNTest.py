@@ -6,21 +6,21 @@ import numpy as np
 
 tf.disable_v2_behavior()
 
-FEATURE_LIST = ['*', 'C', 'N', 'O', 'F', 'S', 'Si', 'P',    # 原子类别
-                'H0', 'H1', 'H2', 'H3',                     # 连接H数量
+FEATURE_LIST = ['*', 'C', 'N', 'O', 'F', 'S', 'Si', 'P',    # atom type
+                'H0', 'H1', 'H2', 'H3',                     # number of the connected H atom
                 'D1', 'D2', 'D3', 'D4',                     # Degree
-                'A0', 'A1',                                 # 芳香性
-                'R0', 'R1']                                 # 是否在环上
+                'A0', 'A1',                                 # aromaticity
+                'R0', 'R1']                                 # is in ring
 
-EDGE_FEATURE_LIST = ['T1.0', 'T1.5', 'T2.0', 'T3.0',                # 键类型
-                     'R0', 'R1',                                    # 是否在环上
-                     'C0', 'C1']                                    # 是否共轭
+EDGE_FEATURE_LIST = ['T1.0', 'T1.5', 'T2.0', 'T3.0',                # bond type
+                     'R0', 'R1',                                    # is in ring
+                     'C0', 'C1']                                    # is conjugated
 
 # Setting
 flags = tf.app.flags
 FLAGS = flags.FLAGS
-flags.DEFINE_string('dataset', './dataset/dataForCompare.csv', 'Dataset string.')
-flags.DEFINE_string('savepath', './ModelForCompare/GCN/gcn.ckpt', 'save path string')
+flags.DEFINE_string('dataset', './dataset/dataForGCN.csv', 'Dataset string.')
+flags.DEFINE_string('savepath', './myGCN/GCN/gcn.ckpt', 'save path string')
 flags.DEFINE_float('val_ratio', 0.1, 'Ratio of validation dataset')
 flags.DEFINE_float('test_ratio', 0.1, 'Ratio of test dataset')
 # model
@@ -78,13 +78,12 @@ print("training dataset: %d, validation dataset: %d, test dataset: %d"
 
 # Define placeholders
 placeholders = {
-    # T_k的数量，相当于Sum的参数beta
     # 'support': [tf.sparse_placeholder(tf.float32) for _ in range(num_supports)],
-    # 特征：节点数, 特征数
+    # feature：[nodes, features]
     'features': [tf.sparse_placeholder(tf.float32, shape=tf.constant(features[0][2], dtype=tf.int64))],
     'edge_features': [tf.placeholder(tf.float32, shape=(FLAGS.max_atoms, FLAGS.max_atoms, 1, len(edge_feature_map)))
                       for _ in range(FLAGS.batchSize)],
-    # 节点的label
+    # label
     'labels': [tf.placeholder(tf.float32, shape=(None, y.shape[1]))],
     # 'labels_mask': tf.placeholder(tf.int32),
     'dropout': tf.placeholder_with_default(0., shape=()),
@@ -126,7 +125,6 @@ def calculateLossAndAccu(features, edge_features, supports, y, text, df):
         res = sess.run([model.outputs, model.labels], feed_dict=feed_dict)
         pred.append(res[0])
         label.append(res[1])
-        # print(df.loc[i, 'SMILES'], " (%d) :"%len(df.loc[i, 'SMILES']), res[0], res[1], outs[1])
         loss.append(outs[0])
         accuracy.append(outs[1])
     loss = np.mean(loss)
