@@ -97,12 +97,12 @@ class GCN(Model):
         super(GCN, self).__init__(**kwargs)
 
         self.inputs = placeholders['features']
-        self.input_dim = input_dim                                              # 特征数
-        self.outputs = []                                                       # batch输出
-        self.num_nodes = num_nodes                                              # 节点数
-        self.num_graphs = num_graphs                                            # GCN层数
+        self.input_dim = input_dim                                              # feature dimension
+        self.outputs = []                                                       # batch outputs
+        self.num_nodes = num_nodes                                              # number of nodes
+        self.num_graphs = num_graphs                                            # number of GCN layer
         self.GCN_outputs = []
-        self.output_dim = placeholders['labels'][0].get_shape().as_list()[1]       # 分类数
+        self.output_dim = placeholders['labels'][0].get_shape().as_list()[1]       # number of labels
         self.placeholders = placeholders
         self.labels = tf.concat(placeholders['labels'], 0)
 
@@ -134,8 +134,8 @@ class GCN(Model):
                                             act=tf.nn.relu,
                                             dropout=False,
                                             sparse_inputs=True,
-                                            is_edge_feature=True,
-                                            edge_bias=True,
+                                            is_edge_feature=False,
+                                            edge_bias=False,
                                             logging=self.logging))
 
         for i in range(self.num_graphs-1):
@@ -148,7 +148,7 @@ class GCN(Model):
                                                 placeholders=self.placeholders,
                                                 act=tf.nn.relu,
                                                 dropout=False,
-                                                is_edge_feature=True,
+                                                is_edge_feature=False,
                                                 edge_bias=edge_bias,
                                                 logging=self.logging))
 
@@ -186,10 +186,10 @@ class GCN(Model):
             self.GCN_outputs = []
             for layer in self.layers[:-2]:
                 hidden = layer(self.activations[-1], i)
-                try:
-                    self.temp = layer.temp
-                except Exception:
-                    pass
+                # try:
+                #     self.temp = layer.temp
+                # except Exception:
+                #     pass
                 self.activations.append(hidden)
                 if len(self.GCN_outputs) < self.num_graphs:
                     self.GCN_outputs.append(hidden)
@@ -246,30 +246,30 @@ class MMGCN(Model):
         self.is_training = is_training
 
         # 输入特征
-        self.gcn_inputs = placeholders['features']                              # GCN特征
-        self.tabnet_inputs_c = tf.concat(placeholders['con_features'], 0)       # 连续特征
-        self.tabnet_inputs_d = {}                                               # 离散特征
-        self.d_feature_dim = d_feature_dim                                      # 离散特征名称及dim
+        self.gcn_inputs = placeholders['features']                              # GCN features
+        self.tabnet_inputs_c = tf.concat(placeholders['con_features'], 0)       # continuous features
+        self.tabnet_inputs_d = {}                                               # discrete features
+        self.d_feature_dim = d_feature_dim                                      # discrete features and dimension
         for name, dim in self.d_feature_dim:
             self.tabnet_inputs_d[name] = tf.concat(placeholders[name], 0)
-        self.tabnet_inputs = []                                                 # tabnet输入特征
-        self.fusion_inputs = None                                               # fusion特征
+        self.tabnet_inputs = []                                                 # tabnet input features
+        self.fusion_inputs = None                                               # fusion features
         self.labels = tf.concat(placeholders['labels'], 0)                      # target
 
         # 层大小
-        self.input_dim = input_dim                                              # gcn特征数
-        self.num_nodes = num_nodes                                              # gcn节点数
-        self.num_graphs = num_graphs                                            # GCN层数
-        self.output_dim = placeholders['labels'][0].get_shape().as_list()[1]    # 模型输出大小
+        self.input_dim = input_dim                                              # dimension of GCN input
+        self.num_nodes = num_nodes                                              # number of GCN nodes
+        self.num_graphs = num_graphs                                            # number of GCN graphs
+        self.output_dim = placeholders['labels'][0].get_shape().as_list()[1]    # output dimension
 
         # 层
-        self.gcn_layers = []                                                    # GCN层
-        self.embedding_layers = {}                                              # Embedding层
-        self.dense_layer = None                                                 # fusion层
+        self.gcn_layers = []                                                    # GCN layers
+        self.embedding_layers = {}                                              # Embedding layers
+        self.dense_layer = None                                                 # fusion layer
 
         # 输出
-        self.gcn_layer_output = []                                              # GCN每层输出
-        self.gcn_output = []                                                    # GCN最终输出
+        self.gcn_layer_output = []                                              # every GCN layer output
+        self.gcn_output = []                                                    # GCN output
         self.tabnet_output = None
         self.outputs = []
 
