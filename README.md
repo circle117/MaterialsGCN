@@ -20,14 +20,7 @@ Dataset
 <img src="./img/MaterialsGCM.png" alt="MaterialsGCM" style="zoom:35%;" />
 
 use dataset 1
-$$
-H^{(l)}=\sigma(\sum_{k=0}^{K}T_k(\tilde{L})H^{(l-1)}W_k)
-$$
-when k = 1:
-$$
-H^{(l)}=\sigma(\sum_{k=0,k\neq 1}^{K}T_k(\tilde{L})H^{(l-1)}W_k)+ 
-\sigma((\delta(EW_e+b_e)\odot T_1(\tilde{L}))H^{(l-1)}W_1)
-$$
+
 parameters
 
 | lr   | batchSize | weight decay | hidden | graphs | Dense | maxAtoms | edgeLayers | edgeBias   | dropout | degree |
