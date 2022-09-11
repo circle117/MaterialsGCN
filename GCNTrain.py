@@ -9,15 +9,15 @@ import random
 
 tf.disable_v2_behavior()
 
-NODE_FEATURE_LIST = ['*', 'C', 'N', 'O', 'F', 'S', 'Si', 'P',       # 原子类别
-                     'H0', 'H1', 'H2', 'H3',                        # 连接H数量
+NODE_FEATURE_LIST = ['*', 'C', 'N', 'O', 'F', 'S', 'Si', 'P',       # atom type
+                     'H0', 'H1', 'H2', 'H3',                        # the number of connected H atom
                      'D1', 'D2', 'D3', 'D4',                        # Degree
-                     'A0', 'A1',                                    # 芳香性
-                     'R0', 'R1']                                    # 是否在环上
+                     'A0', 'A1',                                    # aromaticity
+                     'R0', 'R1']                                    # is in ring
 
-EDGE_FEATURE_LIST = ['T1.0', 'T1.5', 'T2.0', 'T3.0',                # 键类型
-                     'R0', 'R1',                                    # 是否在环上
-                     'C0', 'C1']                                    # 是否共轭
+EDGE_FEATURE_LIST = ['T1.0', 'T1.5', 'T2.0', 'T3.0',                # bond type
+                     'R0', 'R1',                                    # is in ring
+                     'C0', 'C1']                                    # is conjugated
 
 # Set random seed
 seed = 117
@@ -30,8 +30,8 @@ Setting
 flags = tf.app.flags
 FLAGS = flags.FLAGS
 # path
-flags.DEFINE_string('dataset', './dataset/dataForCompare.csv', 'Dataset string.')
-flags.DEFINE_string('savepath', "./ModelForCompare/GCN", 'Save path string')
+flags.DEFINE_string('dataset', './dataset/dataForGCN.csv', 'Dataset string.')
+flags.DEFINE_string('savepath', "./myGCN/GCN/gcn.ckpt", 'Save path string')
 # val test ratio
 flags.DEFINE_float('val_ratio', 0.1, 'Ratio of validation dataset')
 flags.DEFINE_float('test_ratio', 0.1, 'Ratio of test dataset')
@@ -46,8 +46,8 @@ flags.DEFINE_integer('num_dense', 4, 'Number of units in dense layer')
 flags.DEFINE_integer('max_atoms', 80, 'Number of atoms')
 flags.DEFINE_float('dropout', 0.3, 'Dropout rate (1 - keep probability).')
 flags.DEFINE_float('weight_decay', 5e-3, 'Weight for L2 loss on embedding matrix.')
-flags.DEFINE_integer('early_stopping_begin', 20, 'Tolerance for early stopping (# of epochs).')
-flags.DEFINE_integer('early_stopping', 10, 'Tolerance for early stopping (# of epochs).')
+flags.DEFINE_integer('early_stopping_begin', 30, 'Tolerance for early stopping (# of epochs).')
+flags.DEFINE_integer('early_stopping', 5, 'Tolerance for early stopping (# of epochs).')
 flags.DEFINE_integer('max_degree', 2, 'Maximum Chebyshev polynomial degree.')
 
 """
@@ -60,7 +60,7 @@ edge_feature_map = {}
 for idx, feature in enumerate(EDGE_FEATURE_LIST):
     edge_feature_map[feature] = idx
 adjs, node_features, y, edge_features = load_data_gcn(FLAGS.dataset, node_feature_map, FLAGS.max_atoms, edge_feature_map)
-print('数据集大小：%d，特征矩阵大小：(%d, %d)' % (len(adjs), node_features[0].shape[0], node_features[0].shape[1]))
+print('dataset size：%d，feature matrix：(%d, %d)' % (len(adjs), node_features[0].shape[0], node_features[0].shape[1]))
 
 
 """
@@ -94,8 +94,6 @@ supports_val, node_features_val, edge_features_val, y_val = \
                         y, FLAGS.val_ratio,
                         FLAGS.test_ratio)
 list_for_shuffle = list(range(len(supports_train)))
-# length = int(len(supports_val)/FLAGS.batchSize)*FLAGS.batchSize
-# list_for_shuffle_val = list(range(length))
 print("training dataset: %d, validation dataset: %d" % (len(list_for_shuffle), len(supports_val)))
 
 
@@ -103,12 +101,11 @@ print("training dataset: %d, validation dataset: %d" % (len(list_for_shuffle), l
 Define placeholders
 """
 placeholders = {
-    # 特征：节点数, 特征数
+    # feature：[nodes, features]
     'features': [tf.sparse_placeholder(tf.float32, shape=tf.constant(node_features[0][2], dtype=tf.int64))
                  for _ in range(FLAGS.batchSize)],
     'edge_features': [tf.placeholder(tf.float32, shape=(FLAGS.max_atoms, FLAGS.max_atoms, 1, len(edge_feature_map)))
                       for _ in range(FLAGS.batchSize)],
-    # 节点的label
     'labels': [tf.placeholder(tf.float32, shape=(None, y.shape[1])) for _ in range(FLAGS.batchSize)],
     # 'labels_mask': tf.placeholder(tf.int32),
     'dropout': tf.placeholder_with_default(0., shape=()),
@@ -116,7 +113,6 @@ placeholders = {
     'num_features_nonzero': [tf.placeholder(tf.int32) for _ in range(FLAGS.batchSize)]
 }
 # support for batch train
-# T_k的数量，相当于Sum的参数beta
 supportBatch = []
 for i in range(FLAGS.batchSize):
     support = []
@@ -197,7 +193,7 @@ for epoch in range(FLAGS.epochs):
         feed_dict.update({placeholders['dropout']: FLAGS.dropout})
 
         outs = sess.run([model.opt_op, model.loss, model.accuracy], feed_dict=feed_dict)
-        # temp = sess.run(model.temp, feed_dict=feed_dict)
+
         loss.append(outs[1])
         accu.append(outs[2])
     loss_train = np.mean(loss)
@@ -212,7 +208,7 @@ for epoch in range(FLAGS.epochs):
           "train_acc=", "{:.5f}".format(accu_train), "val_loss=", "{:.5f}".format(loss_val),
           "val_acc=", "{:.5f}".format(accu_val), "time=", "{:.5f}".format(time.time() - t))
 
-    random.shuffle(list_for_shuffle)                        # 每个epoch结束后，shuffle
+    random.shuffle(list_for_shuffle)                        # shuffle
     # random.shuffle(list_for_shuffle_val)
 
     # early stop
