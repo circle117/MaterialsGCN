@@ -10,7 +10,7 @@ import os
 tf.disable_v2_behavior()
 tf.disable_eager_execution()
 
-NODE_FEATURE_GCN_LIST = ['*', 'C', 'N', 'O', 'F', 'S', 'Si',         # atom type
+NODE_FEATURE_GCN_LIST = ['*', 'C', 'N', 'O', 'F', 'S', 'Si',    # atom type
                     'H0', 'H1', 'H2', 'H3',                     # number of the connected H atom
                     'D1', 'D2', 'D3', 'D4',                     # Degree
                     'A0', 'A1',                                 # aromaticity
