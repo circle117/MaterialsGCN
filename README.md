@@ -1,153 +1,104 @@
-# 数据集
+# Dataset
 
-数据收集条件
+data collecting conditions
 
-1. 聚酰亚胺，homopolymer，有Tg数据
-2. 包含所需的合成参数
-   - 一步法：反应类型，溶剂，反应温度，反应时间
-   - 两步法：反应类型，溶剂，反应温度，反应时间，第二步使用的方法，最小反应温度，最大反应温度，反应时间
+1. Polyimides & homopolymer & glass transition temperature ($T_g$)
+2. synthetic parameters
+   - step 1: solvent, reaction time and temperature
+   - step 2: minimum reaction temperature, maximum reaction temperature and reaction time
 
-- **存在相同材料分子但合成参数/玻璃化转变温度不同的情况**
+Dataset
 
-数据集
+| No   | Condition                         | Size | Purpose               | Size after data cleaning |
+| ---- | --------------------------------- | ---- | --------------------- | ------------------------ |
+| 1    | delete duplicated molecules       | 881  | GCN training          | 876                      |
+| 2    | use two-step method to synthesize | 635  | MMGCN training        | 622                      |
+| 3    | intersection of dataset 1 & 2     | 522  | GCN & MMGCN comparing | 516                      |
 
-- 共收集数据1015条
+# EXP1 GCN
 
-- | No   | 条件                         | 数量 | 用途               | 删除异常点后的数据量 |
-  | ---- | ---------------------------- | ---- | ------------------ | -------------------- |
-  | 1    | 删除重复材料分子，保留第一条 | 881  | 训练GCN模型        | 876                  |
-  | 2    | 两步法数据                   | 635  | 训练MMGCN模型      | 622                  |
-  | 3    | 两步法数据删除重复材料分子   | 522  | 对比GCN与MMGCN模型 | 463+53=516           |
-  
-  分成dataset x.1以及dataset x.2 
-  
-  - dataset x.1作为训练数据集
-  - dataset x.2用于测试模型的通用性
-  
+<img src="./img/MaterialsGCM.png" alt="MaterialsGCM" style="zoom:35%;" />
 
-# EXP 1 训练GCN
-
-使用删除重复分子的所有数据训练GCN模型
+use dataset 1
 $$
-H^{(l)}=\sum_{i=0}^{2}S_iH^{(l-1)}W_i
+H^{(l)}=\sigma(\sum_{k=0}^{K}T_k(\tilde{L})H^{(l-1)}W_k)
 $$
-对于一阶：
+when k = 1:
 $$
-A_{i,j} =sigmoid(W_{i,j}V_{i,j}+b)\\
-H^{(l)}=(A\odot S_i)H^{(l-1)}W_i
+H^{(l)}=\sigma(\sum_{k=0,k\neq 1}^{K}T_k(\tilde{L})H^{(l-1)}W_k)+ 
+\sigma((\delta(EW_e+b_e)\odot T_1(\tilde{L}))H^{(l-1)}W_1)
 $$
+parameters
 
-* 参数
+| lr   | batchSize | weight decay | hidden | graphs | Dense | maxAtoms | edgeLayers | edgeBias   | dropout | degree |
+| ---- | --------- | ------------ | ------ | ------ | ----- | -------- | ---------- | ---------- | ------- | ------ |
+| 0.01 | 16        | 0.005        | 64     | 4      | 8     | 80       | All        | even layer | 0.3     | 2      |
 
-  | lr   | batchSize | weight decay  | hidden | graphs | Dense | maxAtoms | edgeLayers | edgeBias | dropout | degree |
-  | ---- | --------- | ------------- | ------ | ------ | ----- | -------- | ---------- | -------- | ------- | ------ |
-  | 0.01 | 16        | 0.005 | 64     | 4      | 8     | 80       | All        | 间隔     | 0.3     | 2      |
+result
 
-* result
+| trainLoss | trainAccu | valLoss  | valAccu  | testLoss | testAccu |
+| --------- | --------- | -------- | -------- | -------- | -------- |
+| 24.48531  | 22.64333  | 29.03335 | 27.19137 | 28.32887 | 26.48689 |
 
-  | trainLoss | trainAccu | valLoss | valAccu  | testLoss  | testAccu |
-  | --------- | --------- | ------- |-----------| -------- | -------- |
-  | 24.48531  | 22.64333  | 29.03335 | 27.19137 | 28.32887  | 26.48689 |
+* decrease by 3.84℃ after adding the bond features
 
+# EXP2 Multi-modal Materials GCN
 
-# EXP 2 训练MMGCN
+![MMGCN](./img/MMGCN.png)
 
-使用所有两步法数据训练MMGCN (TabNet+GCN)
+steps
 
-## 方案 1 
+1. train Materials GCN part
+2. train TabNet
 
-### 模型结构
+parameters
 
-```mermaid
-graph TD;
-	高分子材料GCN-->CONCAT
-	合成参数-->CONCAT
-	CONCAT-->TabNet
-	TabNet-->全连接层
-	全连接层-->玻璃化转变温度
+| lr   | batchSize | gen dense | fearture dimension | output dimension | num decision steps | relaxation factor |
+| ---- | --------- | --------- | ------------------ | ---------------- | ------------------ | ----------------- |
+| 0.01 | 32        | 32        | 8                  | 4                | 4                  | 1.5               |
 
-```
+result
 
-### 实验步骤
+| trainAccu | valAccu  | testAccu |
+| --------- | -------- | -------- |
+| 20.41369  | 25.15167 | 24.91037 |
 
-1. 训练GCN模型
-2. 训练TabNet
+* decrease by 1.58℃ after adding synthetic parameters
 
-### 实验结论
+# EXP3 Compare
 
-数据量小，TabNet模型相对较复杂，若直接使用TabNet的输出连接，过拟合严重
+use dataset 3
 
-## 方案 2
+MaterialsGCN
 
-### 模型结构
+| trainLoss | trainAccu | valLoss  | valAccu  | testLoss | testAccu |
+| --------- | --------- | -------- | -------- | -------- | -------- |
+| 27.06340  | 25.57396  | 32.23703 | 30.74669 | 30.07337 | 28.58302 |
 
-```mermaid
-graph TD;
-	高分子材料GCN-->CONCAT
-	TabNet-->CONCAT
-	CONCAT-->全连接层
-	全连接层-->玻璃化转变温度
-```
+Multi-modal MaterialsGCN
 
-### 实验步骤
+| trainAccu | valAccu  | testAccu |
+| --------- | -------- | -------- |
+| 21.73884  | 26.43369 | 27.09359 |
 
-设计1
+# Interpretability
 
-1. 同时训练GCN和TabNet
+### molecular structure
 
-设计2
+Use kmeans cluster to explore the interpretability of the polyimides structure representation matrix (after max pooling layer)
 
-1. 训练GCN
-2. 训练TabNet+预测部分
+<img src="./cluster/result.png" alt="result" style="zoom:33%;" />
 
-- [x] 设计3
+### Synthetic parameters
 
-1. 训练GCN
-2. 训练TabNet
-3. 训练ALL
+| Materials Structure data                | Feature Arributes |
+| --------------------------------------- | ----------------- |
+| Solvent                                 | 1.35665           |
+| Method (step two)                       | 0.76842           |
+| Minimum reaction temperature (step two) | 0.38442           |
+| Maximum reaction temperature (step two) | 0.11288           |
+| Reaction time (step two)                | 0.02037           |
+| Reaction temperature (step one)         | 0.00640           |
+| Reaction time (step one)                | 0.00005           |
 
-### 实验结论
-
-设计1
-
-* 完全降不下去
-
-设计2
-
-* 训练结果有一定下降，但幅度不大=> 设计3
-
-设计3
-
-* 没什么用，跟设计2差不多
-
-
-
-## 实验最优结果
-
-* 参数
-
-  | lr   | batchSize | gen dense | fearture dimension | output dimension | num decision steps | relaxation factor |
-  | ---- | --------- | --------- | ------------------ | ---------------- | ------------------ | ----------------- |
-  | 0.01 | 32        | 32        | 8                  | 4                | 4                  | 1.5               |
-
-* result
-
-  | trainAccu | R2      | valAccu  | R2      | testAccu | R2      |
-  | --------- | ------- | -------- | ------- | -------- | ------- |
-  | 20.41369  | 0.69082 | 25.15167 | 0.70094 | 24.91037 | 0.50544 |
-
-* Save path: ./myMMGCN/MMGCN/mmgcn.ckpt
-
-# EXP3 比较
-
-GCN
-
-| trainLoss | trainAccu | R       | valLoss  | valAccu  | R       | testLoss | testAccu | R       |
-| --------- | --------- | ------- | -------- | -------- | ------- | -------- | -------- | ------- |
-| 27.06340  | 25.57396  | 0.57902 | 32.23703 | 30.74669 | 0.60007 | 30.07337 | 28.58302 | 0.59284 |
-
-MMGCN
-
-  | trainAccu | R2      | valAccu  | R2      | testAccu | R2      |
-  | --------- | ------- | -------- | ------- | -------- | ------- |
-  | 21.73884  | 0.66533 | 26.43369 | 0.71185 | 27.09359 | 0.62142 |
+* solvent and the method used in step two are more related to polyimides feature $T_g$
