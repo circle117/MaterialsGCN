@@ -10,15 +10,15 @@ import os
 tf.disable_v2_behavior()
 tf.disable_eager_execution()
 
-NODE_FEATURE_GCN_LIST = ['*', 'C', 'N', 'O', 'F', 'S', 'Si',         # 原子类别
-                    'H0', 'H1', 'H2', 'H3',                     # 连接H数量
+NODE_FEATURE_GCN_LIST = ['*', 'C', 'N', 'O', 'F', 'S', 'Si',         # atom type
+                    'H0', 'H1', 'H2', 'H3',                     # number of the connected H atom
                     'D1', 'D2', 'D3', 'D4',                     # Degree
-                    'A0', 'A1',                                 # 芳香性
-                    'R0', 'R1']                                 # 是否在环上
+                    'A0', 'A1',                                 # aromaticity
+                    'R0', 'R1']                                 # is in ring
 
-EDGE_FEATURE_LIST = ['T1.0', 'T1.5', 'T2.0', 'T3.0',                # 键类型
-                     'R0', 'R1',                                    # 是否在环上
-                     'C0', 'C1']                                    # 是否共轭
+EDGE_FEATURE_LIST = ['T1.0', 'T1.5', 'T2.0', 'T3.0',                # bond type
+                     'R0', 'R1',                                    # is in ring
+                     'C0', 'C1']                                    # is conjugated
 
 FEATURE_NAME = {'discrete': ['Solvent', 'method2', 'temperature1'],
                 'continuous': ['time1', 'minTemp', 'maxTemp', 'time2']}
@@ -36,7 +36,7 @@ flags = tf.app.flags
 FLAGS = flags.FLAGS
 # path
 flags.DEFINE_string('dataset', './dataset/dataForMMGCN.csv', 'Dataset string.')
-flags.DEFINE_string('savepath', './myMMGCN/tmp', 'Save path sting')
+flags.DEFINE_string('savepath', './myMMGCN/MMGCN/mmgcn.ckpt', 'Save path sting')
 flags.DEFINE_string('store_path', './myMMGCN/GCN/mmgcn.ckpt', 'Store path string')
 flags.DEFINE_float('val_ratio', 0.1, 'Ratio of validation dataset')
 flags.DEFINE_float('test_ratio', 0.1, 'Ratio of validation dataset')
@@ -46,10 +46,10 @@ flags.DEFINE_float('learning_rate', 0.01, 'Initial learning rate.')
 flags.DEFINE_integer('epochs', 200, 'Number of epochs to train.')
 flags.DEFINE_float('dropout', 0, 'Dropout rate (1 - keep probability).')
 flags.DEFINE_float('weight_decay', 5e-3, 'Weight for L2 loss on embedding matrix.')
-flags.DEFINE_integer('early_stopping_begin', 30, 'Tolerance for early stopping')
+flags.DEFINE_integer('early_stopping_begin', 10, 'Tolerance for early stopping')
 flags.DEFINE_integer('early_stopping', 10, 'Tolerance for early stopping (# of epochs).')
-flags.DEFINE_integer('batchSize', 32, 'Number of batch size')
-flags.DEFINE_string('train_model', 'All', 'the model to train')              # GCN, TabNet, All
+flags.DEFINE_integer('batchSize', 16, 'Number of batch size')
+flags.DEFINE_string('train_model', 'TabNet', 'the model to train')              # GCN, TabNet, All
 # GCN
 flags.DEFINE_integer('gcn_hidden', 64, 'Number of units in GCN hidden layer .')
 flags.DEFINE_integer('num_graphs', 4, 'Number of units in hidden layer 3.')
@@ -76,9 +76,9 @@ for idx, feature in enumerate(EDGE_FEATURE_LIST):
     edge_feature_map[feature] = idx
 adjs, node_features, y, edge_features, discrete_features, continuous_features = \
     load_data(FLAGS.dataset, node_feature_map, FEATURE_NAME, FLAGS.max_atoms, edge_feature_map)
-print('数据集大小: %d，特征矩阵大小: (%d, %d)' % (len(adjs), node_features[0].shape[0], node_features[0].shape[1]))
-print('离散数据大小: (%d, %d),' % (len(discrete_features[FEATURE_NAME['discrete'][0]]), len(discrete_features)),
-      '连续数据大小: (%d, %d)' % (continuous_features.shape[0], continuous_features.shape[1]))
+print('dataset size: %d，feature matrix: (%d, %d)' % (len(adjs), node_features[0].shape[0], node_features[0].shape[1]))
+print('discrete data: (%d, %d),' % (len(discrete_features[FEATURE_NAME['discrete'][0]]), len(discrete_features)),
+      'continuous data: (%d, %d)' % (continuous_features.shape[0], continuous_features.shape[1]))
 
 
 """
@@ -135,23 +135,22 @@ list_for_shuffle_val = list(range(len(supports_val)))
 Define placeholders
 """
 placeholders = {
-    # 特征：节点数, 特征数
+    # feature：[nodes, features]
     'features': [tf.sparse_placeholder(tf.float32, shape=tf.constant(node_features[0][2], dtype=tf.int64))
                  for _ in range(FLAGS.batchSize)],
     'edge_features': [tf.placeholder(tf.float32, shape=(FLAGS.max_atoms, FLAGS.max_atoms, 1, len(edge_feature_map)))
                       for _ in range(FLAGS.batchSize)],
-    # 节点的label
+    # label
     'labels': [tf.placeholder(tf.float32, shape=(None, y.shape[1])) for _ in range(FLAGS.batchSize)],
     # 连续特征
     'con_features': [tf.placeholder(tf.float32, shape=(None, continuous_features.shape[1]))
                      for _ in range(FLAGS.batchSize)],
-    # dropout的比例
+    # dropout
     'dropout': tf.placeholder_with_default(0., shape=()),
     # helper variable for sparse dropout
     'num_features_nonzero': [tf.placeholder(tf.int32) for _ in range(FLAGS.batchSize)]
 }
 # support for batch train
-# T_k的数量，相当于Sum的参数beta
 supportBatch = []
 for i in range(FLAGS.batchSize):
     support = []
