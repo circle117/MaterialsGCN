@@ -2,7 +2,7 @@
 
 data collecting conditions
 
-1. Polyimides & homopolymer & glass transition temperature ($T_g$)
+1. Polyimides & homopolymer & glass transition temperature (Tg)
 2. synthetic parameters
    - step 1: solvent, reaction time and temperature
    - step 2: minimum reaction temperature, maximum reaction temperature and reaction time
